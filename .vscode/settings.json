@@ -1,0 +1,9 @@
+{
+    "editor.rulers": [80,],
+    "cSpell.words": [
+        "kubeconfig",
+        "pulumi",
+        "reactflow",
+        "zustand"
+    ]
+}

@@ -1,0 +1,278 @@
+main:
+    steps:
+        - xml_to_json:
+            worker:
+                in_path: /data/xml
+                postgres:
+                    host: postgres
+                    port: 5432
+                    user: postgres
+                    pass: phac@2023
+                    database: postgres
+            producer:
+                broker_host: kafka-internal
+                broker_port: 29092
+                schema_registry_host: schema-reg
+                schema_registry_port: 8081
+                poll_time: 0.0
+                destination_topic:
+                    - factiva-articles:
+                        avro_key_schema_file: unique-article-key.avsc
+                        avro_val_schema_file: unique-article-val.avsc
+            next: dedup_by_id
+        - dedup_by_id:
+            consumer:
+                broker_host: kafka-internal
+                broker_port: 29092
+                schema_registry_host: schema-reg
+                schema_registry_port: 8081
+                poll_time: 1.0
+                auto_offset_reset: earliest
+                consumer_group_id: dedup_by_id
+                source_topic:
+                    - factiva-articles:
+                        avro_key_schema_file: unique-article-key.avsc
+                        avro_val_schema_file: unique-article-val.avsc
+            worker:
+                postgres:
+                    host: localhost
+                    port: 5432
+                    user: postgres
+                    pass: phac@2023
+                    database: postgres
+            producer:
+                broker_host: kafka-internal
+                broker_port: 29092
+                schema_registry_host: schema-reg
+                schema_registry_port: 8081
+                poll_time: 0.0
+                destination_topic:
+                    - unique-articles:
+                        avro_key_schema_file: unique-article-key.avsc
+                        avro_val_schema_file: unique-article-val.avsc
+            next: sentence_segmentation
+        - sentence_segmentation:
+            consumer:
+                broker_host: kafka-internal
+                broker_port: 29092
+                schema_registry_host: schema-reg
+                schema_registry_port: 8081
+                poll_time: 1.0
+                auto_offset_reset: earliest
+                consumer_group_id: sentence_segmentation
+                source_topic:
+                    - unique-articles:
+                        avro_key_schema_file: unique-article-key.avsc
+                        avro_val_schema_file: unique-article-val.avsc
+            worker:
+                language_map:
+                    - ar: ar
+                    - en: en
+                    - es: es
+                    - fr: fr
+                    - pt: pt
+                    - ru: ru
+                    - zh,zhcn: zh-hans
+                    - zhtw: zh-hant
+                max_length: 512
+            producer:
+                broker_host: kafka-internal
+                broker_port: 29092
+                schema_registry_host: schema-reg
+                schema_registry_port: 8081
+                poll_time: 0.0
+                destination_topic:
+                    - segment-articles:
+                        avro_key_schema_file: unique-article-key.avsc
+                        avro_val_schema_file: unique-article-val.avsc
+            next: machine_translator
+        - machine_translator:
+            consumer:
+                broker_host: kafka-internal
+                broker_port: 29092
+                schema_registry_host: schema-reg
+                schema_registry_port: 8081
+                poll_time: 1.0
+                auto_offset_reset: earliest
+                consumer_group_id: machine_translator
+                source_topic:
+                    - segment-articles:
+                        avro_key_schema_file: unique-article-key.avsc
+                        avro_val_schema_file: unique-article-val.avsc
+            worker:
+                huggingface_model_map:
+                    - ar: Helsinki-NLP/opus-mt-ar-en
+                    - es: Helsinki-NLP/opus-mt-es-en
+                    - fr: Helsinki-NLP/opus-mt-fr-en
+                    - pt: facebook/m2m100_418M
+                    - ru: Helsinki-NLP/opus-mt-ru-en
+                    - zh,zhcn,zhtw: Helsinki-NLP/opus-mt-zh-en
+                max_length: 512
+            producer:
+                broker_host: kafka-internal
+                broker_port: 29092
+                schema_registry_host: schema-reg
+                schema_registry_port: 8081
+                poll_time: 0.0
+                destination_topic:
+                    - english-articles:
+                        avro_key_schema_file: unique-article-key.avsc
+                        avro_val_schema_file: unique-article-val.avsc
+                    - unknown-language-articles:
+                        avro_key_schema_file: unique-article-key.avsc
+                        avro_val_schema_file: unique-article-val.avsc
+            next: topic_classifier
+        - topic_classifier:
+            consumer:
+                broker_host: kafka-internal
+                broker_port: 29092
+                schema_registry_host: schema-reg
+                schema_registry_port: 8081
+                poll_time: 1.0
+                auto_offset_reset: earliest
+                consumer_group_id: topic_classifier
+                source_topic:
+                    - english-articles:
+                        avro_key_schema_file: unique-article-key.avsc
+                        avro_val_schema_file: unique-article-val.avsc
+            worker:
+                huggingface_model: facebook/bart-large-mnli
+                labels: accident,bioterrorism,contaminated foods,contaminated water,disease outbreaks,exposure to chemicals,infectious diseases,natural disasters,radioactive agents,safety of products,safety of drugs,safety of medical devices
+                max_length: 1024
+                threshold: 0.85
+            producer:
+                broker_host: kafka-internal
+                broker_port: 29092
+                schema_registry_host: schema-reg
+                schema_registry_port: 8081
+                poll_time: 0.0
+                destination_topic:
+                    - classified-articles:
+                        avro_key_schema_file: unique-article-key.avsc
+                        avro_val_schema_file: unique-article-val.avsc
+            next: text_summarizer
+        - text_summarizer:
+            consumer:
+                broker_host: kafka-internal
+                broker_port: 29092
+                schema_registry_host: schema-reg
+                schema_registry_port: 8081
+                poll_time: 1.0
+                auto_offset_reset: earliest
+                consumer_group_id: text_summarizer
+                source_topic:
+                    - classified-articles:
+                        avro_key_schema_file: unique-article-key.avsc
+                        avro_val_schema_file: unique-article-val.avsc
+            worker:
+                huggingface_model: facebook/bart-large-cnn
+                input_length_limit: 1024
+            producer:
+                broker_host: kafka-internal
+                broker_port: 29092
+                schema_registry_host: schema-reg
+                schema_registry_port: 8081
+                poll_time: 0.0
+                destination_topic:
+                    - summarized-articles:
+                        avro_key_schema_file: unique-article-key.avsc
+                        avro_val_schema_file: unique-article-val.avsc
+            next: named_entity_recognizer
+        - named_entity_recognizer:
+            consumer:
+                broker_host: kafka-internal
+                broker_port: 29092
+                schema_registry_host: schema-reg
+                schema_registry_port: 8081
+                poll_time: 1.0
+                auto_offset_reset: earliest
+                consumer_group_id: named_entity_recognizer
+                source_topic:
+                    - summarized-articles:
+                        avro_key_schema_file: unique-article-key.avsc
+                        avro_val_schema_file: unique-article-val.avsc
+            worker:
+                stanford_corenlp_url: http://stanford-corenlp:9000
+                http_timeout: 300000
+                annotators: tokenize,ner,regexner
+                std_ners: CAUSE_OF_DEATH,CITY,COUNTRY,CRIMINAL_CHARGE,DATE,DURATION,EMAIL,HANDLE,IDEOLOGY,LOCATION,MISC,MONEY,NATIONALITY,NUMBER,ORDINAL,ORGANIZATION,PERCENT,PERSON,RELIGION,SET,STATE_OR_PROVINCE,TIME,TITLE,URL
+            producer:
+                broker_host: kafka-internal
+                broker_port: 29092
+                schema_registry_host: schema-reg
+                schema_registry_port: 8081
+                poll_time: 0.0
+                destination_topic:
+                    - recognized-articles:
+                        avro_key_schema_file: unique-article-key.avsc
+                        avro_val_schema_file: unique-article-val.avsc
+            next: 
+                - dedup_by_content
+        - dedup_by_content:
+            consumer:
+                broker_host: kafka-internal
+                broker_port: 29092
+                schema_registry_host: schema-reg
+                schema_registry_port: 8081
+                poll_time: 1.0
+                auto_offset_reset: earliest
+                consumer_group_id: dedup_by_content
+                source_topic:
+                    - recognized-articles:
+                        avro_key_schema_file: unique-article-key.avsc
+                        avro_val_schema_file: unique-article-val.avsc
+            worker:
+                postgres:
+                    host: dedup-by-content-postgres
+                    port: 5432
+                    user: postgres
+                    pass: phac@2023
+                    database: postgres
+                    batch_size: 1000
+                gpu_device: cuda
+                huggingface_model: sentence-transformers/all-MiniLM-L6-v2
+                paragraph_similarity_threshold: 0.85
+                content_similarty_threshold: 0.85
+                number_of_threads: 64
+                single_instance: false
+            producer:
+                broker_host: kafka-internal
+                broker_port: 29092
+                schema_registry_host: schema-reg
+                schema_registry_port: 8081
+                poll_time: 0.0
+                destination_topic:
+                    - pending-review-articles:
+                        avro_key_schema_file: unique-article-key.avsc
+                        avro_val_schema_file: unique-article-val.avsc
+            next: human_reviewer
+        - human_reviewer:
+            sink:
+                topic: pending-review-articles
+                connector: pending-review
+                postgres:
+                    host: postgres
+                    port: 5432
+                    user: postgres
+                    pass: phac@2023
+                    database: postgres
+                table: pending_review
+                pk_fields: doc_id
+                command: CREATE TABLE IF NOT EXISTS pending_review (doc_id TEXT PRIMARY KEY, doc_file TEXT, doc_type TEXT, dates TEXT[], dup_id_list TEXT[], folder_name TEXT[], full_text TEXT, headline TEXT, headline_original TEXT, key_phrases_json TEXT, lang_id TEXT, lang_name TEXT, named_entities_json TEXT, sentences TEXT[], sentences_original TEXT[], sim_id_list TEXT[], source TEXT, snippet TEXT[], snippet_original TEXT[], summary_text TEXT, topics TEXT, is_reviewed BOOLEAN DEFAULT FALSE);
+            source:
+                topic_prefix: review-
+                connector: review-complete
+                postgres:
+                    host: postgres
+                    port: 5432
+                    user: postgres
+                    pass: phac@2023
+                    database: postgres
+                table: status
+                pk_fields: doc_id
+                command: CREATE TABLE IF NOT EXISTS status(sequence_id SERIAL PRIMARY KEY, doc_id TEXT, is_relevant BOOLEAN);
+            next: graph_builder
+        - graph_builder:
+            source:
+                topic: known-identical-articles,known-similar-articles,pending-review-articles,review-status
+            next: end

@@ -1,0 +1,430 @@
+main:
+  flows:
+    - name: xml_to_json
+      worker:
+        type: custom
+        in_path: /data/xml
+        postgres:
+          host: postgres
+          port: 5432
+          user: postgres
+          pass: phac@2023
+          database: postgres
+      producer:
+        broker_host: kafka-internal
+        broker_port: 29092
+        schema_registry_host: schema-reg
+        schema_registry_port: 8081
+        poll_time: 1
+        topics:
+          - factiva-articles
+      pipelayer:
+        x: -39.50322726017276
+        y: -1070.2515956648424
+    - name: dedup_by_id
+      worker:
+        type: python
+        postgres:
+          host: localhost
+          port: 5432
+          user: postgres
+          pass: phac@2023
+          database: postgres
+      consumer:
+        broker_host: kafka-internal
+        broker_port: 29092
+        schema_registry_host: schema-reg
+        schema_registry_port: 8081
+        poll_time: 1
+        auto_offset_reset: earliest
+        consumer_group_id: dedup_by_id
+        topics:
+          - factiva-articles
+      producer:
+        broker_host: kafka-internal
+        broker_port: 29092
+        schema_registry_host: schema-reg
+        schema_registry_port: 8081
+        poll_time: 0
+        topics:
+          - unique-articles
+      pipelayer:
+        x: 294.59755750319493
+        y: -1069.087009602542
+    - name: sentence_segmentation
+      consumer:
+        broker_host: kafka-internal
+        broker_port: 29092
+        schema_registry_host: schema-reg
+        schema_registry_port: 8081
+        poll_time: 1
+        auto_offset_reset: earliest
+        consumer_group_id: sentence_segmentation
+        topics:
+          - unique-articles
+      worker:
+        type: python
+        language_map:
+          - ar: ar
+          - en: en
+          - es: es
+          - fr: fr
+          - pt: pt
+          - ru: ru
+          - "zh,zhcn": zh-hans
+          - zhtw: zh-hant
+        max_length: 512
+      producer:
+        broker_host: kafka-internal
+        broker_port: 29092
+        schema_registry_host: schema-reg
+        schema_registry_port: 8081
+        poll_time: 0
+        topics:
+          - segment-articles
+      pipelayer:
+        x: 170.69029307900996
+        y: -925.7244926973963
+    - name: machine_translator
+      consumer:
+        broker_host: kafka-internal
+        broker_port: 29092
+        schema_registry_host: schema-reg
+        schema_registry_port: 8081
+        poll_time: 1
+        auto_offset_reset: earliest
+        consumer_group_id: machine_translator
+        topics:
+          - segment-articles
+      worker:
+        type: pytorch
+        replicas: 4
+        huggingface_model_map:
+          - ar: Helsinki-NLP/opus-mt-ar-en
+          - es: Helsinki-NLP/opus-mt-es-en
+          - fr: Helsinki-NLP/opus-mt-fr-en
+          - pt: facebook/m2m100_418M
+          - ru: Helsinki-NLP/opus-mt-ru-en
+          - "zh,zhcn,zhtw": Helsinki-NLP/opus-mt-zh-en
+        max_length: 512
+      producer:
+        broker_host: kafka-internal
+        broker_port: 29092
+        schema_registry_host: schema-reg
+        schema_registry_port: 8081
+        poll_time: 0
+        topics:
+          - english-articles
+          - unknown-language-articles
+      pipelayer:
+        x: -38.634890664665235
+        y: -809.3098173157744
+    - name: topic_classifier
+      consumer:
+        broker_host: kafka-internal
+        broker_port: 29092
+        schema_registry_host: schema-reg
+        schema_registry_port: 8081
+        poll_time: 1
+        auto_offset_reset: earliest
+        consumer_group_id: topic_classifier
+        topics:
+          - english-articles
+      worker:
+        type: pytorch
+        replicas: 4
+        huggingface_model: facebook/bart-large-mnli
+        labels: accident,bioterrorism,contaminated foods,contaminated water,disease
+          outbreaks,exposure to chemicals,infectious diseases,natural
+          disasters,radioactive agents,safety of products,safety of drugs,safety
+          of medical devices
+        max_length: 1024
+        threshold: 0.85
+      producer:
+        broker_host: kafka-internal
+        broker_port: 29092
+        schema_registry_host: schema-reg
+        schema_registry_port: 8081
+        poll_time: 0
+        topics:
+          - classified-articles
+      pipelayer:
+        x: 451.54781706042206
+        y: -742.6565785930741
+    - name: text_summarizer
+      consumer:
+        broker_host: kafka-internal
+        broker_port: 29092
+        schema_registry_host: schema-reg
+        schema_registry_port: 8081
+        poll_time: 1
+        auto_offset_reset: earliest
+        consumer_group_id: text_summarizer
+        topics:
+          - classified-articles
+      worker:
+        type: pytorch
+        replicas: 4
+        huggingface_model: facebook/bart-large-cnn
+        input_length_limit: 1024
+      producer:
+        broker_host: kafka-internal
+        broker_port: 29092
+        schema_registry_host: schema-reg
+        schema_registry_port: 8081
+        poll_time: 0
+        topics:
+          - summarized-articles
+      pipelayer:
+        x: -53.346730962159064
+        y: -591.6551611758252
+    - name: named_entity_recognizer
+      consumer:
+        broker_host: kafka-internal
+        broker_port: 29092
+        schema_registry_host: schema-reg
+        schema_registry_port: 8081
+        poll_time: 1
+        auto_offset_reset: earliest
+        consumer_group_id: named_entity_recognizer
+        topics:
+          - summarized-articles
+      worker:
+        type: python
+        replicas: 8
+        stanford_corenlp_url: http://stanford-corenlp:9000
+        http_timeout: 300000
+        annotators: tokenize,ner,regexner
+        std_ners: CAUSE_OF_DEATH,CITY,COUNTRY,CRIMINAL_CHARGE,DATE,DURATION,EMAIL,HANDLE,IDEOLOGY,LOCATION,MISC,MONEY,NATIONALITY,NUMBER,ORDINAL,ORGANIZATION,PERCENT,PERSON,RELIGION,SET,STATE_OR_PROVINCE,TIME,TITLE,URL
+      producer:
+        broker_host: kafka-internal
+        broker_port: 29092
+        schema_registry_host: schema-reg
+        schema_registry_port: 8081
+        poll_time: 0
+        topics:
+          - recognized-articles
+      pipelayer:
+        x: 355.0075387052241
+        y: -591.6551611758252
+    - name: dedup_by_content
+      consumer:
+        broker_host: kafka-internal
+        broker_port: 29092
+        schema_registry_host: schema-reg
+        schema_registry_port: 8081
+        poll_time: 1
+        auto_offset_reset: earliest
+        consumer_group_id: dedup_by_content
+        topics:
+          - recognized-articles
+      worker:
+        type: pytorch
+        replicas: 4
+        postgres:
+          host: dedup-by-content-postgres
+          port: 5432
+          user: postgres
+          pass: phac@2023
+          database: postgres
+          batch_size: 1000
+        gpu_device: cuda
+        huggingface_model: sentence-transformers/all-MiniLM-L6-v2
+        paragraph_similarity_threshold: 0.85
+        content_similarty_threshold: 0.85
+        number_of_threads: 64
+        single_instance: false
+      producer:
+        broker_host: kafka-internal
+        broker_port: 29092
+        schema_registry_host: schema-reg
+        schema_registry_port: 8081
+        poll_time: 0
+        topics:
+          - pending-review-articles
+      pipelayer:
+        x: -38.16904853166221
+        y: -417.11782399585695
+  topics:
+    factiva-articles:
+      avro_key_schema_file: unique-article-key.avsc
+      avro_val_schema_file: unique-article-val.avsc
+      pipelayer:
+        x: 117.59504892936687
+        y: -1069.8271818119647
+    unique-articles:
+      avro_key_schema_file: unique-article-key.avsc
+      avro_val_schema_file: unique-article-val.avsc
+      pipelayer:
+        x: -26.3766034559794
+        y: -926.464664906819
+    english-articles:
+      avro_key_schema_file: unique-article-key.avsc
+      avro_val_schema_file: unique-article-val.avsc
+      pipelayer:
+        x: 266.84451088527527
+        y: -722.2521689451909
+    unknown-language-articles:
+      avro_key_schema_file: unique-article-key.avsc
+      avro_val_schema_file: unique-article-val.avsc
+      pipelayer:
+        x: 230.82000874199116
+        y: -808.8212351572776
+    segment-articles:
+      avro_key_schema_file: unique-article-key.avsc
+      avro_val_schema_file: unique-article-val.avsc
+      pipelayer:
+        x: 495.70866959244586
+        y: -925.3208958960538
+    classified-articles:
+      avro_key_schema_file: unique-article-key.avsc
+      avro_val_schema_file: unique-article-val.avsc
+      pipelayer:
+        x: 623.8603696700239
+        y: -722.6731276391563
+    summarized-articles:
+      avro_key_schema_file: unique-article-key.avsc
+      avro_val_schema_file: unique-article-val.avsc
+      pipelayer:
+        x: 140.48636626200908
+        y: -571.6717102219075
+    recognized-articles:
+      avro_key_schema_file: unique-article-key.avsc
+      avro_val_schema_file: unique-article-val.avsc
+      pipelayer:
+        x: 591.032152816235
+        y: -571.6717102219075
+    pending-review-articles:
+      avro_key_schema_file: unique-article-key.avsc
+      avro_val_schema_file: unique-article-val.avsc
+      pipelayer:
+        x: 190.63258285728116
+        y: -397.1343730419391
+  avro:
+    - type: record
+      name: unique_article_key
+      fields:
+        - name: doc_id
+          type: string
+      pipelayer:
+        x: 829.3984562565794
+        y: -941.9501773973453
+    - type: record
+      name: unique_article_value
+      fields:
+        - name: doc_id
+          type:
+            - "null"
+            - string
+          default: null
+        - name: doc_file
+          type:
+            - "null"
+            - string
+          default: null
+        - name: doc_type
+          type:
+            - "null"
+            - string
+          default: null
+        - name: dates
+          type:
+            - "null"
+            - type: array
+              items: string
+          default: null
+        - name: dup_id_list
+          type:
+            - "null"
+            - type: array
+              items: string
+          default: null
+        - name: folder_name
+          type:
+            - "null"
+            - type: array
+              items: string
+          default: null
+        - name: full_text
+          type:
+            - "null"
+            - string
+          default: null
+        - name: headline
+          type:
+            - "null"
+            - string
+          default: null
+        - name: headline_original
+          type:
+            - "null"
+            - string
+          default: null
+        - name: key_phrases_json
+          type:
+            - "null"
+            - string
+          default: null
+        - name: lang_id
+          type:
+            - "null"
+            - string
+          default: null
+        - name: lang_name
+          type:
+            - "null"
+            - string
+          default: null
+        - name: named_entities_json
+          type:
+            - "null"
+            - string
+          default: null
+        - name: sentences
+          type:
+            - "null"
+            - type: array
+              items: string
+          default: null
+        - name: sentences_original
+          type:
+            - "null"
+            - type: array
+              items: string
+          default: null
+        - name: sim_id_list
+          type:
+            - "null"
+            - type: array
+              items: string
+          default: null
+        - name: source
+          type:
+            - "null"
+            - string
+          default: null
+        - name: snippet
+          type:
+            - "null"
+            - type: array
+              items: string
+          default: null
+        - name: snippet_original
+          type:
+            - "null"
+            - type: array
+              items: string
+          default: null
+        - name: summary_text
+          type:
+            - "null"
+            - string
+          default: null
+        - name: topics
+          type:
+            - "null"
+            - string
+          default: null
+      pipelayer:
+        x: 820.2888228447069
+        y: -860.1443247416478

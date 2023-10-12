@@ -1,0 +1,263 @@
+main:
+  flows:
+    - id: 2e64efea-04b9-48ef-b5a5-0914c0d4d90a
+      type: worker
+      name: dedup_by_id
+      producer.topics:
+        - unique-articles
+      consumer.topics:
+        - factiva-articles
+      image: dedup_by_id
+      pipelayer:
+        x: 167.75302402195751
+        y: -1134.4707897475096
+    - id: 1666b5db-20a0-4f9f-b061-88cb622af495
+      type: worker
+      name: sentence_segmentation
+      consumer.topics:
+        - unique-articles
+      producer.topics:
+        - segment-articles
+      image: sentence_segmentation
+      pipelayer:
+        x: 177.22867109350676
+        y: -1015.9541092974519
+    - id: 03d270a0-ec86-49e5-b3ac-a17e655d000f
+      type: gpu-worker
+      name: machine_translator
+      consumer.topics:
+        - segment-articles
+      producer.topics:
+        - unknown-language-articles
+        - english-articles
+      image: machine_translator
+      pipelayer:
+        x: -58.25002470815555
+        y: -890.3857046955343
+    - id: 90345c47-58f4-4647-a61f-15417f7d0726
+      type: gpu-worker
+      name: topic_classifier
+      consumer.topics:
+        - english-articles
+      producer.topics:
+        - classified-articles
+      image: topic_classifier
+      pipelayer:
+        x: 451.54781706042206
+        y: -805.4250075322432
+    - id: 18fd1d3f-b639-413b-a269-ce9510c672aa
+      type: gpu-worker
+      name: text_summarizer
+      consumer.topics:
+        - classified-articles
+      producer.topics:
+        - summarized-articles
+      image: text_summarizer
+      pipelayer:
+        x: -83.42326982884423
+        y: -697.576885010673
+    - id: 9d6e211e-7ef9-4b0d-914b-cc54f6b2fb3c
+      type: worker
+      name: named_entity_recognizer
+      consumer.topics:
+        - summarized-articles
+      producer.topics:
+        - recognized-articles
+      image: named_entity_recognizer
+      pipelayer:
+        x: 437.60014239810755
+        y: -699.9452776871376
+    - id: 3056a623-fbbc-40ba-83bb-fe92589ed16a
+      type: gpu-worker
+      name: dedup_by_content
+      consumer.topics:
+        - recognized-articles
+      producer.topics:
+        - pending-review-articles
+      image: dedup_by_content
+      pipelayer:
+        x: -102.90606383270344
+        y: -581.769916103464
+    - id: 6e832ad9-6b76-4118-bbf8-f7382321fbd3
+      type: worker
+      name: sentiment
+      image: sentiment_analysis
+      consumer.topics:
+        - pending-review-articles
+      pipelayer:
+        x: 520.6459849306186
+        y: -580.6381011750434
+  topics:
+    factiva-articles:
+      id: 90e67011-5fd3-4304-8380-aebb74d0545a
+      name: factiva-articles
+      type: topic
+      replicationFactor: 3
+      partitions: 8
+      kafka:
+        - GPHIN
+      pipelayer:
+        x: -65.4795354765428
+        y: -1135.2109619569324
+    unique-articles:
+      id: 5f503f2b-039b-4c0a-8c82-1e475c9cffb3
+      name: unique-articles
+      type: topic
+      replicationFactor: 3
+      partitions: 8
+      kafka:
+        - GPHIN
+      pipelayer:
+        x: -47.29941310236908
+        y: -1015.3866059039751
+    english-articles:
+      id: 689e81ed-82d8-4e2b-8d4f-4d86f2f7b366
+      name: english-articles
+      type: topic
+      replicationFactor: 3
+      partitions: 8
+      kafka:
+        - GPHIN
+      pipelayer:
+        x: 211.92213556350237
+        y: -804.6357319278502
+    unknown-language-articles:
+      id: e644f90e-e7a1-4ad0-a626-ef0510e0b546
+      name: unknown-language-articles
+      type: topic
+      replicationFactor: 3
+      partitions: 8
+      kafka:
+        - GPHIN
+      pipelayer:
+        x: 247.81979157968277
+        y: -889.8971225370375
+    segment-articles:
+      id: 6153593a-7305-4b67-ac6a-8799c0966a84
+      name: segment-articles
+      type: topic
+      replicationFactor: 3
+      partitions: 8
+      kafka:
+        - GPHIN
+      pipelayer:
+        x: 479.1479153835586
+        y: -1016.6086589230509
+    classified-articles:
+      id: 304df46d-1230-4b3c-980e-dd733ef2f70d
+      name: classified-articles
+      type: topic
+      replicationFactor: 3
+      partitions: 8
+      kafka:
+        - GPHIN
+      pipelayer:
+        x: 702.3209058439853
+        y: -805.0566906218156
+    summarized-articles:
+      id: 1b73c29c-6f51-4b4c-a458-31607def328b
+      name: summarized-articles
+      type: topic
+      replicationFactor: 3
+      partitions: 8
+      kafka:
+        - GPHIN
+      pipelayer:
+        x: 170.56290512869427
+        y: -698.5162437031449
+    recognized-articles:
+      id: d4cecb59-7b2d-4ba9-8777-0cef53ba65ad
+      name: recognized-articles
+      type: topic
+      replicationFactor: 3
+      partitions: 8
+      kafka:
+        - GPHIN
+      pipelayer:
+        x: 745.9402977706732
+        y: -699.6249395579366
+    pending-review-articles:
+      id: 370ffd6b-8c3d-40ad-ae35-14e1e9a4b789
+      name: pending-review-articles
+      type: topic
+      replicationFactor: 3
+      partitions: 8
+      kafka:
+        - GPHIN
+      pipelayer:
+        x: 160.37864579586332
+        y: -581.6851105438498
+  platform:
+    - id: ada2a84e-88ca-4933-9f78-145d6c185b49
+      type: pipelayer
+      name: GPHIN
+      kafka.ui.username: kafkaui
+      kafka.ui.password: phac@2023
+      postgres.username: postgres
+      postgres.password: phac@2023
+      kafka.replicas: 4
+      zookeeper.replicas: 4
+      neo4j.username: neo4j
+      neo4j.password: phac@2023
+      cluster:
+        - Google Cloud Platform
+      pipelayer:
+        x: -61.87959167086068
+        y: -1234.7958536655058
+  cloud:
+    - id: 53ab2262-a6b7-497f-930d-71aff5849827
+      name: Google Cloud Platform
+      type: GCP
+      projectId: phx-lucbeliveau
+      region: northamerica-northeast1
+      clusterName: pipelayer
+      location: northamerica-northeast1-c
+      pipelayer:
+        x: 132.46316875853893
+        y: -1234.6190520878038
+  avro:
+    - id: 0d25763c-55ef-4bc9-b2c0-e14b256cfd4b
+      type: avro
+      name: Article
+      key: |-
+        {
+        	"type": "record",
+        	"name": "unique_article_key",
+        	"fields": [
+        		{
+        			"name": "doc_id",
+        			"type": "string"
+        		}
+        	]
+        }
+      value: >-
+        {
+            "type": "record",
+            "name": "unique_article_value",
+            "fields": [
+                {"name": "doc_id",  "type": ["null", "string"], "default": null},
+                {"name": "doc_file",  "type": ["null", "string"], "default": null},
+                {"name": "doc_type", "type": ["null",	"string"], "default": null},
+                {"name": "dates", "type": ["null", {"type": "array", "items": "string"}], "default": null},
+                {"name": "dup_id_list", "type": ["null", {"type": "array", "items": "string"}], "default": null},
+                {"name": "folder_name", "type": ["null", {"type": "array", "items": "string"}], "default": null},
+                {"name": "full_text", "type": ["null", "string"], "default": null},
+                {"name": "headline", "type": ["null", "string"], "default": null},
+                {"name": "headline_original", "type": ["null",	"string"], "default": null},
+                {"name": "key_phrases_json", "type": ["null", "string"], "default": null},
+                {"name": "lang_id", "type": ["null", "string"], "default": null},
+                {"name": "lang_name", "type": ["null", "string"], "default": null},
+                {"name": "named_entities_json", "type": ["null", "string"], "default": null},
+                {"name": "sentences", "type": ["null", {"type": "array", "items": "string"}], "default": null},
+                {"name": "sentences_original", "type": ["null", {"type": "array", "items": "string"}], "default": null},
+                {"name": "sim_id_list", "type": ["null", {"type": "array", "items": "string"}], "default": null},
+                {"name": "source", "type": ["null", "string"], "default": null},
+                {"name": "snippet", "type": ["null", {"type": "array", "items": "string"}], "default": null},
+                {"name": "snippet_original", "type": ["null", {"type": "array", "items": "string"}], "default": null},
+                {"name": "summary_text", "type": ["null", "string"], "default": null},
+                {"name": "topics", "type": ["null", "string"], "default": null}
+            ]
+        }
+      pipelayer:
+        x: 465.6245647723795
+        y: -1240.1146080802928

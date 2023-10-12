@@ -1,0 +1,4 @@
+encryptionsalt: v1:XFbQLgDT6hA=:v1:aCHHaj5FaqiX3rfG:087wV951X50aIOxgbbkGj+VvWf1VRg==
+config:
+  gcp:project: phx-lucbeliveau
+  gcp:region: northamerica-northeast1

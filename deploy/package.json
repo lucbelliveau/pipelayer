@@ -1,0 +1,15 @@
+{
+    "name": "deploy",
+    "main": "index.ts",
+    "devDependencies": {
+        "@types/node": "^16"
+    },
+    "dependencies": {
+        "@pulumi/docker": "^4.4.1",
+        "@pulumi/gcp": "^6.0.0",
+        "@pulumi/kubernetes": "^4.1.1",
+        "@pulumi/kubernetes-cert-manager": "^0.0.5",
+        "@pulumi/pulumi": "^3.0.0",
+        "dotenv": "^16.3.1"
+    }
+}
