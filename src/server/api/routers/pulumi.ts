@@ -1,5 +1,7 @@
 import { spawn } from "child_process";
+import { tmpdir, platform } from "os";
 import { unlinkSync, writeFileSync } from "fs";
+import { join } from "path";
 
 import * as pulumi from "@pulumi/pulumi";
 import type * as k8s from "@pulumi/kubernetes";
@@ -68,7 +70,7 @@ function forwardService(
     )
     .apply(([meta, _, kubeconfig]) => {
       return new Promise<() => void>((resolve, reject) => {
-        const kubePath = "/tmp/pipelayer.kubeconfig";
+        const kubePath = join(tmpdir(), "pipelayer.kubeconfig");
         writeFileSync(kubePath, kubeconfig);
         if (typeof service !== "string" && !meta)
           throw new Error("Invalid service specified for port-forward.");
@@ -83,6 +85,7 @@ function forwardService(
         }`;
         console.log(`Setting up port forward [${fwd_str}]...`);
 
+        try {
         const forwarderHandle = spawn(
           "kubectl",
           ["port-forward", svc, `${opts.localPort}:${opts.targetPort || 80}`],
@@ -100,11 +103,19 @@ function forwardService(
               console.log("Error while trying to delete kubeconfig.");
               console.error(e);
             } finally {
+              if (platform() === "win32") {
+                return spawn("taskkill", ["/F", "/IM", "kubectl*"]);
+              }
               return forwarderHandle.kill();
             }
           })
         );
         forwarderHandle.stderr.on("data", () => reject());
+        } catch (e) {
+          console.log('Error setting up port forward.');
+          console.error(e);
+          throw e;
+        }
       });
     });
 }
@@ -250,7 +261,11 @@ const yamlToProgram = (
           if (block.program) {
             // Make sure there are no lingering port forwards
             // TODO: Make this more robust (or get rid of port forwards)
-            spawn("killall", ["kubectl"]);
+            if (platform() === "win32") {
+              spawn("taskkill", ["/F", "/IM", "kubectl*"])
+            } else {
+              spawn("killall", ["kubectl"]);
+            }
             programFunctions.push({
               ready,
               func: async (ctx: StackContext) => {
@@ -436,8 +451,11 @@ export const pulumiRouter = createTRPCRouter({
               event.diagnosticEvent &&
               event.diagnosticEvent.prefix === "error: "
             ) {
-              console.log("error...");
+              console.log(event);
               diagnostics.push(event.diagnosticEvent);
+            } else if (event.diagnosticEvent &&
+              event.diagnosticEvent.prefix === "debug: ") {
+              // debug
             } else {
               // console.log(event);
             }

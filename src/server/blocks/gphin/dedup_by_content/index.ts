@@ -163,6 +163,9 @@ const program = async (
       name: k8s_name,
       enableServiceLinks: false,
       noService: true,
+      tolerations: [
+        { key: "sku", operator: "Equal", value: "gpu", effect: "NoSchedule" },
+      ],
       containers: [
         {
           image,

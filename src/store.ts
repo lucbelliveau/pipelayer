@@ -6,10 +6,18 @@ import {
   type BlockConfig,
   type BlockConfiguration,
   type WorkflowOperationResult,
+  type ProvidedResourceType,
 } from "./types";
 import { type Workflow } from "@prisma/client";
 import { type PreviewResult, type UpResult } from "@pulumi/pulumi/automation";
 
+export type EdgeHiddenHandles = {
+  k8s: boolean;
+  kafka: boolean;
+  avro: boolean;
+  topic: boolean;
+  postgres: boolean;
+};
 interface PipeLayerState {
   busy: boolean;
   workflow?: Workflow;
@@ -27,6 +35,12 @@ interface PipeLayerState {
   status: {
     error?: string;
   };
+  hiddenHandles: EdgeHiddenHandles;
+  setHiddenHandles: (hiddenHandles: EdgeHiddenHandles) => void;
+  toggleHiddenHandle: (
+    handle: "k8s" | "kafka" | "avro" | "topic" | "postgres",
+    state?: boolean
+  ) => void;
   nodes: Node<NodeData>[];
   edges: Edge[];
   selectedNode: string;
@@ -47,8 +61,62 @@ interface PipeLayerState {
   setShowErrorDialog: (show: string) => void;
 }
 
+const isTypeHidden = (
+  type: ProvidedResourceType,
+  hiddenHandles: EdgeHiddenHandles
+) => {
+  switch (type) {
+    case "data-contract":
+      return hiddenHandles.avro;
+    case "kafka-topic":
+      return hiddenHandles.topic;
+    case "postgres":
+      return hiddenHandles.postgres;
+    case "provider-kafka":
+      return hiddenHandles.kafka;
+    case "provider-kubernetes":
+      return hiddenHandles.k8s;
+  }
+};
+
+const withHiddenEdges = (edges: Edge[], hiddenHandles: EdgeHiddenHandles) => {
+  return edges.map((edge) => ({
+    ...edge,
+    hidden:
+      isTypeHidden(edge.sourceHandle as ProvidedResourceType, hiddenHandles) ||
+      isTypeHidden(edge.targetHandle as ProvidedResourceType, hiddenHandles),
+  }));
+};
+
 const usePipeLayer = create<PipeLayerState>((set) => ({
   busy: false,
+  hiddenHandles: {
+    k8s: true,
+    kafka: true,
+    avro: true,
+    topic: false,
+    postgres: true,
+  },
+  setHiddenHandles: (hiddenHandles: EdgeHiddenHandles) =>
+    set(() => ({
+      hiddenHandles,
+    })),
+  toggleHiddenHandle: (
+    handle: "k8s" | "kafka" | "avro" | "topic" | "postgres",
+    state?: boolean
+  ) =>
+    set(({ hiddenHandles, edges }) => {
+      const val = typeof state === "boolean" ? state : !hiddenHandles[handle];
+      const _hiddenHandles = Object.assign({}, hiddenHandles, {
+        [handle]: val,
+      });
+
+      return {
+        hiddenHandles: _hiddenHandles,
+        edges: withHiddenEdges(edges, _hiddenHandles),
+      };
+    }),
+
   workflow: undefined,
   preview: undefined,
   updatePreview: (preview) =>
@@ -92,11 +160,16 @@ const usePipeLayer = create<PipeLayerState>((set) => ({
   ) => {
     try {
       // validatePipelayerYaml(workflow.yaml);
-      set(() => {
+      set(({ hiddenHandles }) => {
         const { edges, nodes } = yamlToFlow(workflow, blocks);
         // const compose = toDocker(workflow.yaml);
         console.log("-- workflow updated --");
-        return { workflow, nodes, edges, status: {} };
+        return {
+          workflow,
+          nodes,
+          edges: withHiddenEdges(edges, hiddenHandles),
+          status: {},
+        };
       });
       return true;
     } catch (e: unknown) {
@@ -106,9 +179,15 @@ const usePipeLayer = create<PipeLayerState>((set) => ({
     return false;
   },
   updateNodes: (nodes: Node<NodeData>[]) => set(() => ({ nodes })),
-  updateEdges: (edges: Edge[]) => set(() => ({ edges })),
+  updateEdges: (edges: Edge[]) =>
+    set(({ hiddenHandles }) => ({
+      edges: withHiddenEdges(edges, hiddenHandles),
+    })),
   updateNodeAndEdges: (nodes: Node<NodeData>[], edges: Edge[]) =>
-    set(() => ({ nodes, edges })),
+    set(({ hiddenHandles }) => ({
+      nodes,
+      edges: withHiddenEdges(edges, hiddenHandles),
+    })),
   setShowErrorDialog: (showErrorDialog: string) =>
     set(() => ({ showErrorDialog })),
 }));

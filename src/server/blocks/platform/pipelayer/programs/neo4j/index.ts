@@ -39,77 +39,77 @@ export default function deployNeo4J(
     options
   );
 
-  createDeployment(
-    {
-      name: "neo4j",
-      enableServiceLinks: false,
-      containers: [
-        {
-          image: "neo4j:5.8.0",
-          ports: [
-            { name: "http", containerPort: 7474 },
-            { name: "https", containerPort: 7473 },
-            { name: "bolt", containerPort: 7687 },
-          ],
-          volumes: [
-            { name: "import", mountPath: "/import", filestore: true },
-            { name: "data", mountPath: "/data", filestore: true },
-            { name: "logs", mountPath: "/logs", filestore: true },
-            { name: "plugins", mountPath: "/plugins", filestore: true },
-            {
-              name: "scripts",
-              mountPath: "/configmap",
-              configMap: configMap.metadata.name,
-            },
-          ],
-          readinessProbe: {
-            timeoutSeconds: 10,
-            failureThreshold: 20,
-            exec: {
-              command: [
-                "/var/lib/neo4j/bin/cypher-shell",
-                "-u",
-                neo4j_username,
-                "-p",
-                neo4j_password,
-                "MATCH () RETURN count(*) as count",
-              ],
-            },
-          },
-          env: [
-            { name: "NEO4J_ACCEPT_LICENSE_AGREEMENT", value: "yes" },
-            {
-              name: "NEO4J_AUTH",
-              value: `${neo4j_username}/${neo4j_password}`,
-            },
-            {
-              name: "NEO4J_server_default__advertised__address",
-              value: "neo4j",
-            },
-            { name: "NEO4j_server_bolt_advertised_address", value: ":7687" },
-            { name: "NEO4j_server_http_advertised_address", value: ":7474" },
-            { name: "NEO4J_server_default__listen__address", value: "0.0.0.0" },
-            { name: "NEO4j_server_bolt_listen_address", value: ":7687" },
-            { name: "NEO4j_server_http_listen_address", value: ":7474" },
-            { name: "NEO4J_server_memory_pagecache_size", value: "8G" },
-            { name: "NEO4J_server_memory_heap.initial__size", value: "8G" },
-            { name: "NEO4J_server_memory_heap_max__size", value: "16G" },
-            { name: "NEO4J_apoc_export_file_enabled", value: "true" },
-            { name: "NEO4J_apoc_import_file_enabled", value: "true" },
-            {
-              name: "NEO4J_apoc_import_file_use__neo4j__config",
-              value: "true",
-            },
-            {
-              name: "NEO4J_dbms_security_procedures_unrestricted",
-              value: "apoc.*,gds.*",
-            },
-          ],
-        },
-      ],
-    },
-    options
-  );
+  // createDeployment(
+  //   {
+  //     name: "neo4j",
+  //     enableServiceLinks: false,
+  //     containers: [
+  //       {
+  //         image: "neo4j:5.8.0",
+  //         ports: [
+  //           { name: "http", containerPort: 7474 },
+  //           { name: "https", containerPort: 7473 },
+  //           { name: "bolt", containerPort: 7687 },
+  //         ],
+  //         volumes: [
+  //           { name: "import", mountPath: "/import", readWriteMany: true },
+  //           { name: "data", mountPath: "/data", readWriteMany: true },
+  //           { name: "logs", mountPath: "/logs", readWriteMany: true },
+  //           { name: "plugins", mountPath: "/plugins", readWriteMany: true },
+  //           {
+  //             name: "scripts",
+  //             mountPath: "/configmap",
+  //             configMap: configMap.metadata.name,
+  //           },
+  //         ],
+  //         readinessProbe: {
+  //           timeoutSeconds: 10,
+  //           failureThreshold: 20,
+  //           exec: {
+  //             command: [
+  //               "/var/lib/neo4j/bin/cypher-shell",
+  //               "-u",
+  //               neo4j_username,
+  //               "-p",
+  //               neo4j_password,
+  //               "MATCH () RETURN count(*) as count",
+  //             ],
+  //           },
+  //         },
+  //         env: [
+  //           { name: "NEO4J_ACCEPT_LICENSE_AGREEMENT", value: "yes" },
+  //           {
+  //             name: "NEO4J_AUTH",
+  //             value: `${neo4j_username}/${neo4j_password}`,
+  //           },
+  //           {
+  //             name: "NEO4J_server_default__advertised__address",
+  //             value: "neo4j",
+  //           },
+  //           { name: "NEO4j_server_bolt_advertised_address", value: ":7687" },
+  //           { name: "NEO4j_server_http_advertised_address", value: ":7474" },
+  //           { name: "NEO4J_server_default__listen__address", value: "0.0.0.0" },
+  //           { name: "NEO4j_server_bolt_listen_address", value: ":7687" },
+  //           { name: "NEO4j_server_http_listen_address", value: ":7474" },
+  //           { name: "NEO4J_server_memory_pagecache_size", value: "8G" },
+  //           { name: "NEO4J_server_memory_heap.initial__size", value: "8G" },
+  //           { name: "NEO4J_server_memory_heap_max__size", value: "16G" },
+  //           { name: "NEO4J_apoc_export_file_enabled", value: "true" },
+  //           { name: "NEO4J_apoc_import_file_enabled", value: "true" },
+  //           {
+  //             name: "NEO4J_apoc_import_file_use__neo4j__config",
+  //             value: "true",
+  //           },
+  //           {
+  //             name: "NEO4J_dbms_security_procedures_unrestricted",
+  //             value: "apoc.*,gds.*",
+  //           },
+  //         ],
+  //       },
+  //     ],
+  //   },
+  //   options
+  // );
 
   // createJob({
   //   name: "init-neo4j",

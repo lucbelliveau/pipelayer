@@ -257,8 +257,8 @@ KafkaServer {
               provider: options?.provider,
               localPort: 29093,
               targetPort: 29093,
-              // service: "pod/broker-0",
-              service: kafka_service,
+              service: "pod/broker-3",
+              // service: kafka_service,
               statefulset,
             }
           : undefined,

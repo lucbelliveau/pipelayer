@@ -54,6 +54,7 @@ model User {
   email         String?    @unique
   emailVerified DateTime?
   image         String?
+  hiddenHandles String     @default("{\"k8s\":true,\"kafka\":true,\"avro\":true,\"topic\":false,\"postgres\":true}")
   accounts      Account[]
   sessions      Session[]
   workflows     Workflow[]

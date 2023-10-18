@@ -1,8 +1,8 @@
 import * as pulumi from "@pulumi/pulumi";
-import * as azure from "@pulumi/azure";
+import * as azure from "@pulumi/azure-native";
 import * as kubernetes from "@pulumi/kubernetes";
+import { local } from "@pulumi/command";
 
-import { type NodePool } from "@pulumi/gcp/container";
 import { type ResourceOptions } from "@pulumi/pulumi";
 import { dependsOn, provider } from "../../utils";
 import {
@@ -17,10 +17,11 @@ import {
 import logo from "./logo.png";
 
 type GoogleCloudConfiguration = BlockConfiguration<{
+  resourceGroupName: string;
   tenantId: string;
   subscriptionId: string;
-  // appid: string;
-  // password: string;
+  appid: string;
+  password: string;
 
   location: string;
   clusterName?: string;
@@ -46,327 +47,236 @@ const program = async (
   options: ResourceOptions | undefined
   // eslint-disable-next-line @typescript-eslint/require-await
 ) => {
-  const { tenantId, subscriptionId, clusterName } = config;
-    const pipelayerClusterName = clusterName;
+  const {
+    resourceGroupName,
+    appid,
+    password,
+    tenantId,
+    subscriptionId,
+    clusterName,
+    location,
+    nodeCountCpu,
+    nodeCountGpu,
+    scaledDown,
+  } = config;
+  const pipelayerClusterName = clusterName;
 
-    const azure_provider = new azure.Provider("azure-provider", {
-      subscriptionId,
-      tenantId,
-    });
-  //   // Enable compute API
-  //   const compute_api = new gcp.projects.Service(
-  //     "compute-api",
-  //     {
-  //       disableDependentServices: true,
-  //       project,
-  //       service: "compute.googleapis.com",
+  const Ephemerality = "1 day";
+
+  const tags = {
+    ClientOrganization: "Ph",
+    Environment: "Sandbox",
+    Ephemerality,
+  };
+
+  const azure_provider = new azure.Provider("azure-provider", {
+    subscriptionId,
+    tenantId,
+    clientId: appid,
+    clientSecret: password,
+  });
+
+  const azure_options = provider(azure_provider, options);
+
+  const rg = new azure.resources.ResourceGroup(resourceGroupName);
+
+  // const factiva_storage = new azure.storage.StorageAccount(
+  //   "factiva",
+  //   {
+  //     location,
+  //     resourceGroupName: rg.name,
+  //     kind: azure.storage.Kind.StorageV2,
+  //     sku: {
+  //       name: azure.storage.SkuName.Standard_LRS,
   //     },
-  //     provider(gcp_provider, options)
-  //   );
-  //   // Enable Container API
-  //   const kubernetes_api = new gcp.projects.Service(
-  //     "kubernetes-api",
-  //     {
-  //       disableDependentServices: true,
-  //       project,
-  //       service: "container.googleapis.com",
+  //     tags,
+  //   },
+  //   azure_options
+  // );
+
+  // new azure.storage.BlobContainer(
+  //   "factiva-articles",
+  //   {
+  //     containerName: "articles",
+  //     accountName: factiva_storage.name,
+  //     resourceGroupName: rg.name,
+  //   },
+  //   azure_options
+  // );
+
+  const cluster = new azure.containerservice.ManagedCluster(
+    "k8s-cluster",
+    {
+      resourceName: pipelayerClusterName,
+      location,
+      resourceGroupName: rg.name,
+      dnsPrefix: "gphin",
+      identity: {
+        type: azure.containerservice.ResourceIdentityType.SystemAssigned,
+      },
+      agentPoolProfiles: [
+        {
+          name: "cpu",
+          count: scaledDown ? 0 : nodeCountCpu,
+          mode: azure.containerservice.AgentPoolMode.System,
+          maxPods: 110,
+          osDiskSizeGB: 512,
+          osType: azure.containerservice.OSType.Linux,
+          type: azure.containerservice.AgentPoolType.VirtualMachineScaleSets,
+          vmSize: "Standard_DS2_v2",
+        },
+        // {
+        //   name: "gpu",
+        //   count: scaledDown ? 0 : nodeCountGpu,
+        //   mode: azure.containerservice.AgentPoolMode.User,
+        //   maxPods: 110,
+        //   osDiskSizeGB: 512,
+        //   osType: azure.containerservice.OSType.Linux,
+        //   type: azure.containerservice.AgentPoolType.VirtualMachineScaleSets,
+        //   vmSize: "standard_nc6s_v3",
+        //   nodeTaints: ["sku=gpu:NoSchedule"],
+        //   workloadRuntime: "UseGPUDedicatedVHD",
+        // },
+      ],
+      // kubernetesVersion: "1.28.0",
+      tags,
+    },
+    azure_options
+  );
+
+  // new local.Command(
+  //   "create-gpu-node-pool",
+  //   {
+  //     create: pulumi.interpolate`az aks nodepool add --resource-group ${rg.name} --cluster-name ${cluster.name} --name gpu --node-count ${nodeCountGpu} --node-vm-size standard_nc6s_v3 --node-taints sku=gpu:NoSchedule --aks-custom-headers UseGPUDedicatedVHD=true`,
+  //     delete: "az aks nodepool delete gpu",
+  //   },
+  //   { deleteBeforeReplace: true }
+  // );
+
+  const creds = azure.containerservice.listManagedClusterUserCredentialsOutput(
+    {
+      resourceGroupName: rg.name,
+      resourceName: cluster.name,
+    },
+    azure_options
+  );
+
+  let kubeconfig: pulumi.Output<string> | null = null;
+  if (creds.kubeconfigs) {
+    const config = creds.kubeconfigs[0];
+    if (config) {
+      kubeconfig = config.value.apply((enc: string) =>
+        Buffer.from(enc, "base64").toString()
+      );
+    }
+  }
+
+  if (kubeconfig === null) throw new Error("Unable to create kubeconfig");
+
+  const k8s_provider = new kubernetes.Provider(
+    "gke",
+    { kubeconfig },
+    { dependsOn: [cluster] }
+  );
+
+  new kubernetes.storage.v1.StorageClass(
+    "pipelayer-readwritemany",
+    {
+      metadata: {
+        name: "pipelayer-readwritemany",
+      },
+      provisioner: "file.csi.azure.com",
+      volumeBindingMode: "Immediate",
+      allowVolumeExpansion: true,
+      parameters: {
+        skuName: "Standard",
+      },
+    },
+    provider(k8s_provider, options)
+  );
+
+  // Setup NVIDIA drivers
+  // const gpu_namespace = new kubernetes.core.v1.Namespace("gpu-resources", {
+  //   metadata: { name: "gpu-resources" },
+  // });
+
+  // new kubernetes.apps.v1.DaemonSet(
+  //   "nvidia-drivers",
+  //   {
+  //     metadata: {
+  //       name: "nvidia-device-plugin-daemonset",
+  //       namespace: gpu_namespace.metadata.name,
   //     },
-  //     provider(gcp_provider, options)
-  //   );
-  //   // Enable Artifact Registry API
-  //   const artifact_api = new gcp.projects.Service(
-  //     "artifact-api",
-  //     {
-  //       disableDependentServices: true,
-  //       project,
-  //       service: "artifactregistry.googleapis.com",
-  //     },
-  //     provider(gcp_provider, options)
-  //   );
-  //   // Enable Cloud Filestore API
-  //   const file_api = new gcp.projects.Service(
-  //     "file-api",
-  //     {
-  //       disableDependentServices: true,
-  //       project,
-  //       service: "file.googleapis.com",
-  //     },
-  //     provider(gcp_provider, options)
-  //   );
-  //   // Enable Cloud Filestore API
-  //   const resource_manager_api = new gcp.projects.Service(
-  //     "resource-manager-api",
-  //     {
-  //       disableDependentServices: true,
-  //       project,
-  //       service: "cloudresourcemanager.googleapis.com",
-  //     },
-  //     provider(gcp_provider, options)
-  //   );
-  //   // Create a new network
-  //   const network = new gcp.compute.Network(
-  //     "gke-network",
-  //     {
-  //       autoCreateSubnetworks: false,
-  //       description: "A virtual network for your GKE cluster(s)",
-  //     },
-  //     provider(gcp_provider, options)
-  //   );
-  //   // Create a new subnet in the network created above
-  //   const subnet = new gcp.compute.Subnetwork(
-  //     "gke-subnet",
-  //     {
-  //       ipCidrRange: "10.128.0.0/12",
-  //       network: network.id,
-  //       privateIpGoogleAccess: true,
-  //     },
-  //     provider(gcp_provider, options)
-  //   );
-  //   //create CloudRouter to give private GKE Cluster Nodes access to the internet -> Docker Hub
-  //   const router = new gcp.compute.Router(
-  //     "gke-nat",
-  //     {
-  //       network: network.id,
-  //     },
-  //     provider(gcp_provider, options)
-  //   );
-  //   //create CloudNAT to give private GKE Cluster Nodes access to the internet -> Docker Hub
-  //   const nat = new gcp.compute.RouterNat(
-  //     "gke-nat",
-  //     {
-  //       router: router.name,
-  //       natIpAllocateOption: "AUTO_ONLY",
-  //       sourceSubnetworkIpRangesToNat: "ALL_SUBNETWORKS_ALL_IP_RANGES",
-  //     },
-  //     provider(gcp_provider, options)
-  //   );
-  //   // Create a new GKE cluster with filestore CSI driver
-  //   const cluster = new gcp.container.Cluster(
-  //     pipelayerClusterName,
-  //     {
-  //       addonsConfig: {
-  //         gcpFilestoreCsiDriverConfig: {
-  //           enabled: true,
+  //     spec: {
+  //       selector: {
+  //         matchLabels: {
+  //           name: "nvidia-device-plugin-ds",
   //         },
-  //         dnsCacheConfig: {
-  //           enabled: true,
-  //         },
   //       },
-  //       binaryAuthorization: {
-  //         evaluationMode: "PROJECT_SINGLETON_POLICY_ENFORCE",
+  //       updateStrategy: {
+  //         type: "RollingUpdate",
   //       },
-  //       datapathProvider: "ADVANCED_DATAPATH",
-  //       description: "A GKE cluster",
-  //       initialNodeCount: 1,
-  //       ipAllocationPolicy: {
-  //         clusterIpv4CidrBlock: "/14",
-  //         servicesIpv4CidrBlock: "/20",
-  //       },
-  //       location,
-  //       masterAuthorizedNetworksConfig: {
-  //         cidrBlocks: [
-  //           {
-  //             cidrBlock: "0.0.0.0/0",
-  //             displayName: "All networks",
+  //       template: {
+  //         metadata: {
+  //           annotations: {
+  //             "scheduler.alpha.kubernetes.io/critical-pod": "",
   //           },
-  //         ],
-  //       },
-  //       minMasterVersion: "1.27.3-gke.100",
-  //       network: network.name,
-  //       networkingMode: "VPC_NATIVE",
-  //       privateClusterConfig: {
-  //         enablePrivateNodes: true,
-  //         enablePrivateEndpoint: false,
-  //         masterIpv4CidrBlock: "10.100.0.0/28",
-  //       },
-  //       removeDefaultNodePool: true,
-  //       releaseChannel: {
-  //         channel: "STABLE",
-  //       },
-  //       subnetwork: subnet.name,
-  //       workloadIdentityConfig: {
-  //         workloadPool: `${project}.svc.id.goog`,
-  //       },
-  //     },
-  //     dependsOn([compute_api, kubernetes_api], options)
-  //   );
-  //   // Create a service account for the node pool
-  //   const gkeNodepoolSa = new gcp.serviceaccount.Account(
-  //     "gke-nodepool-sa",
-  //     {
-  //       accountId: pulumi.interpolate`${cluster.name}-np-1-sa`,
-  //       displayName: "Nodepool 1 Service Account",
-  //     },
-  //     provider(gcp_provider, options)
-  //   );
-  //   // Allow the k8s member nodes to pull images from artifact registry
-  //   new gcp.projects.IAMMember(
-  //     "allow_image_pull",
-  //     {
-  //       project,
-  //       role: "roles/artifactregistry.reader",
-  //       member: pulumi.interpolate`serviceAccount:${gkeNodepoolSa.email}`,
-  //     },
-  //     provider(gcp_provider, dependsOn([resource_manager_api], options))
-  //   );
-  //   // Create the node pools.  (Sets of VMs that run containers)
-  //   const nodePools: NodePool[] = [];
-  //   // Create a nodepool for regular CPU workloads
-  //   nodePools.push(
-  //     new gcp.container.NodePool(
-  //       "gke-nodepool",
-  //       {
-  //         cluster: cluster.id,
-  //         nodeCount: scaledDown ? 0 : nodeCountCpu,
-  //         nodeConfig: {
-  //           machineType: "n1-standard-16",
-  //           oauthScopes: [
-  //             "https://www.googleapis.com/auth/cloud-platform",
-  //             "https://www.googleapis.com/auth/devstorage.read_only",
-  //           ],
-  //           serviceAccount: gkeNodepoolSa.email,
-  //           diskSizeGb: 512,
+  //           labels: {
+  //             name: "nvidia-device-plugin-ds",
+  //           },
   //         },
-  //       },
-  //       dependsOn([nat], options)
-  //     )
-  //   );
-  //   // Create a nodepool for GPU workloads
-  //   nodePools.push(
-  //     new gcp.container.NodePool(
-  //       "gke-nodepool-gpu-exclusive",
-  //       {
-  //         cluster: cluster.id,
-  //         nodeCount: scaledDown ? 0 : nodeCountGpu,
-  //         nodeConfig: {
-  //           machineType: "n1-standard-8",
-  //           diskSizeGb: 512,
-  //           oauthScopes: ["https://www.googleapis.com/auth/cloud-platform"],
-  //           serviceAccount: gkeNodepoolSa.email,
-  //           taints: [
+  //         spec: {
+  //           tolerations: [
+  //             { key: "CriticalAddonsOnly", operator: "Exists" },
   //             {
-  //               effect: "NO_SCHEDULE",
   //               key: "nvidia.com/gpu",
-  //               value: "present",
+  //               operator: "Exists",
+  //               effect: "NoSchedule",
+  //             },
+  //             {
+  //               key: "sku",
+  //               operator: "Equal",
+  //               value: "gpu",
+  //               effect: "NoSchedule",
   //             },
   //           ],
-  //           guestAccelerators: [
+  //           containers: [
   //             {
-  //               count: 4,
-  //               type: "nvidia-tesla-t4",
-  //               gpuDriverInstallationConfig: {
-  //                 gpuDriverVersion: "DEFAULT",
+  //               image: "mcr.microsoft.com/oss/nvidia/k8s-device-plugin:v0.14.1",
+  //               name: "nvidia-device-plugin-ctr",
+  //               securityContext: {
+  //                 allowPrivilegeEscalation: false,
+  //                 capabilities: { drop: ["ALL"] },
   //               },
+  //               volumeMounts: [
+  //                 {
+  //                   name: "device-plugin",
+  //                   mountPath: " /var/lib/kubelet/device-plugins",
+  //                 },
+  //               ],
+  //             },
+  //           ],
+  //           volumes: [
+  //             {
+  //               name: "device-plugin",
+  //               hostPath: { path: "/var/lib/kubelet/device-plugins" },
   //             },
   //           ],
   //         },
   //       },
-  //       dependsOn([nat], options)
-  //     )
-  //   );
-  //   const clusterKubeconfig = pulumi
-  //     .all([cluster.name, cluster.endpoint, cluster.masterAuth])
-  //     .apply(([name, endpoint, masterAuth]) => {
-  //       const context = `${project}_${region}_${name}`;
-  //       return `apiVersion: v1
-  // clusters:
-  // - cluster:
-  //     certificate-authority-data: ${masterAuth.clusterCaCertificate}
-  //     server: https://${endpoint}
-  //   name: ${context}
-  // contexts:
-  // - context:
-  //     cluster: ${context}
-  //     user: ${context}
-  //   name: ${context}
-  // current-context: ${context}
-  // kind: Config
-  // preferences: {}
-  // users:
-  // - name: ${context}
-  //   user:
-  //     exec:
-  //       apiVersion: client.authentication.k8s.io/v1beta1
-  //       command: gke-gcloud-auth-plugin
-  //       installHint: Install gke-gcloud-auth-plugin for use with kubectl by following
-  //         https://cloud.google.com/blog/products/containers-kubernetes/kubectl-auth-changes-in-gke
-  //       provideClusterInfo: true
-  // `;
-  //     });
-  //   const k8s_provider = new kubernetes.Provider(
-  //     "gke",
-  //     { kubeconfig: clusterKubeconfig },
-  //     { dependsOn: nodePools }
-  //   );
-  //   new gcp.artifactregistry.Repository(
-  //     "registry",
-  //     {
-  //       description: "Registry for pipelayer docker containers",
-  //       // dockerConfig: {
-  //       //   immutableTags: true,
-  //       // },
-  //       format: "DOCKER",
-  //       location: region,
-  //       repositoryId: "pipelayer",
   //     },
-  //     dependsOn([artifact_api], options)
-  //   );
-  //   // const filestore = new gcp.filestore.Instance(
-  //   //   "nfs-server",
-  //   //   {
-  //   //     project,
-  //   //     location,
-  //   //     tier: "BASIC_HDD",
-  //   //     fileShares: {
-  //   //       capacityGb: 1024,
-  //   //       name: "cache",
-  //   //     },
-  //   //     networks: [{ network: network.name, modes: ["MODE_IPV4"] }],
-  //   //   },
-  //   //   dependsOn([file_api], options)
-  //   // );
-  //   // new kubernetes.storage.v1.StorageClass(
-  //   //   "filestore-pipelayer",
-  //   //   {
-  //   //     metadata: {
-  //   //       name: "filestore-pipelayer",
-  //   //     },
-  //   //     provisioner: "filestore.csi.storage.gke.io",
-  //   //     volumeBindingMode: "Immediate",
-  //   //     allowVolumeExpansion: true,
-  //   //     parameters: {
-  //   //       tier: "standard",
-  //   //       network: network.name,
-  //   //     },
-  //   //   },
-  //   //   dependsOn([filestore], provider(k8s_provider, options))
-  //   // );
-  //   new kubernetes.storage.v1.StorageClass(
-  //     "filestore-pipelayer",
-  //     {
-  //       metadata: {
-  //         name: "filestore-pipelayer",
-  //       },
-  //       provisioner: "filestore.csi.storage.gke.io",
-  //       volumeBindingMode: "Immediate",
-  //       allowVolumeExpansion: true,
-  //       parameters: {
-  //         tier: "enterprise",
-  //         multishare: "true",
-  //         "max-volume-size": "128Gi",
-  //         network: network.name,
-  //       },
-  //     },
-  //     provider(k8s_provider, options)
-  //   );
-  //   return {
-  //     provided: [
-  //       {
-  //         type: "provider-kubernetes",
-  //         resource: k8s_provider,
-  //       },
-  //     ],
-  //   } as ProvidedResourceReturn;
+  //   },
+  //   provider(k8s_provider, options)
+  // );
+
+  return {
+    provided: [
+      {
+        type: "provider-kubernetes",
+        resource: k8s_provider,
+      },
+    ],
+  } as ProvidedResourceReturn;
 };
 
 const Block: BlockConfig<GoogleCloudConfiguration> = {
@@ -381,29 +291,41 @@ const Block: BlockConfig<GoogleCloudConfiguration> = {
     {
       name: "azure",
       fields: [
-        // {
-        //   name: "appid",
-        //   title: "Service principal",
-        //   description: "Service principal account",
-        //   type: "text",
-        //   required: true,
-        //   regexp: /^[a-z][-a-z0-9]{4,28}[a-z0-9]{1}$/gm,
-        // },
-        // {
-        //   name: "password@private",
-        //   title: "Password",
-        //   type: "text",
-        //   inputType: "password",
-        //   required: true,
-        //   description: "Service Principal password",
-        // },
+        {
+          name: "appid",
+          title: "Service principal",
+          description: "Service principal account",
+          type: "text",
+          required: true,
+        },
+        {
+          name: "password@private",
+          title: "Password",
+          type: "text",
+          inputType: "password",
+          required: true,
+          description: "Service Principal password",
+        },
+        {
+          title: "Scaled down",
+          name: "scaledDown",
+          description: "If enabled scales down to 0 nodes.",
+          default: false,
+          type: "boolean",
+        },
+        {
+          name: "resourceGroupName",
+          title: "Resource group name",
+          description: "Azure resource group to create resources in.",
+          type: "text",
+          required: true,
+        },
         {
           name: "tenantId@private",
           title: "Tenant id",
           description: "Azure tenant id.",
           type: "text",
           required: true,
-          regexp: /^[a-z][-a-z0-9]{4,28}[a-z0-9]{1}$/gm,
         },
         {
           name: "subscriptionId@private",
@@ -411,7 +333,6 @@ const Block: BlockConfig<GoogleCloudConfiguration> = {
           description: "Azure subscription id.",
           type: "text",
           required: true,
-          regexp: /^[a-z][-a-z0-9]{4,28}[a-z0-9]{1}$/gm,
         },
         {
           title: "Location",

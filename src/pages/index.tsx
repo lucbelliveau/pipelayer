@@ -43,9 +43,11 @@ import ReactFlow, {
   applyEdgeChanges,
   type Node,
   type NodeProps,
+  ConnectionLineComponentProps,
 } from "reactflow";
 import "reactflow/dist/style.css";
 
+import { Model } from "survey-core";
 import { Survey } from "survey-react-ui";
 import "survey-core/defaultV2.min.css";
 
@@ -53,11 +55,14 @@ import Editor from "@monaco-editor/react";
 
 import { api } from "~/utils/api";
 
-import usePipeLayer from "~/store";
+import usePipeLayer, { EdgeHiddenHandles } from "~/store";
 import {
   createNode,
+  edgeColors,
+  edgeStyles,
+  edgeType,
   isValidConnection,
-  topicLinkNodesFromEdges,
+  updateWorkflowFromEdges,
 } from "~/utils/workflow";
 import React from "react";
 import { flowToYaml, getPrivateData } from "../utils/workflow";
@@ -67,14 +72,15 @@ import {
   type BlockConfig,
   type NodeData,
   type NodeDragDropTransferObject,
-  NodeDataPayload,
-  BlockCommonConfiguration,
+  type BlockCommonConfiguration,
+  ProvidedResourceType,
 } from "~/types";
 
 // TODO - move this to the GCP block
 import { Question, ElementFactory, Serializer } from "survey-core";
 import ErrorModal from "~/components/ErrorModal";
 import { type Workflow } from "@prisma/client";
+import { createModelFromBlockConfig } from "~/pipelayer";
 
 class GCPLoginButtonModel extends Question {
   getType() {
@@ -123,14 +129,65 @@ Serializer.addClass(
 //   return createElement(GCPLoginButton, props);
 // });
 
-const getBlockStyle = (type: BlockTypes) => {
-  if (type === "cloud") return "bg-lime-100";
-  if (type === "platform") return "bg-blue-100";
-  if (type === "topic") return "bg-orange-300";
-  if (type === "avro") return "bg-orange-100";
+const getBlockStyle = (type: BlockTypes | ProvidedResourceType | "blank") => {
+  if (type === "cloud" || type === "provider-kubernetes") return "bg-lime-100";
+  if (type === "platform" || type === "provider-kafka" || type === "postgres")
+    return "bg-blue-100";
+  if (type === "topic" || type === "kafka-topic") return "bg-orange-300";
+  if (type === "avro" || type === "data-contract") return "bg-orange-100";
   if (type === "worker") return "bg-green-100";
   if (type === "gpu-worker") return "bg-green-300";
   return "bg-slate-300";
+};
+
+const ConnectionLine = ({
+  fromX,
+  fromY,
+  fromHandle,
+  toX,
+  toY,
+}: ConnectionLineComponentProps) => {
+  if (fromHandle && fromHandle.id && fromHandle.id in edgeStyles) {
+    const es = edgeStyles[fromHandle.id as ProvidedResourceType];
+    return (
+      <g>
+        <path
+          fill="none"
+          stroke={es.stroke}
+          strokeWidth={es.strokeWidth}
+          className="animated"
+          d={`M${fromX},${fromY} C ${fromX} ${toY} ${fromX} ${toY} ${toX},${toY}`}
+        />
+        <circle
+          cx={toX}
+          cy={toY}
+          fill="#fff"
+          r={3}
+          stroke="#222"
+          strokeWidth={1.5}
+        />
+      </g>
+    );
+  }
+  return (
+    <g>
+      <path
+        fill="none"
+        stroke="#222"
+        strokeWidth={1.5}
+        className="animated"
+        d={`M${fromX},${fromY} C ${fromX} ${toY} ${fromX} ${toY} ${toX},${toY}`}
+      />
+      <circle
+        cx={toX}
+        cy={toY}
+        fill="#fff"
+        r={3}
+        stroke="#222"
+        strokeWidth={1.5}
+      />
+    </g>
+  );
 };
 
 export default function Home() {
@@ -141,8 +198,21 @@ export default function Home() {
     refetchOnWindowFocus: false,
   });
 
-  const { update, showErrorDialog, setShowErrorDialog, setPreviewDirty } =
-    usePipeLayer((state) => state);
+  const settings = api.settings.get.useQuery(undefined, {
+    refetchOnWindowFocus: false,
+  });
+
+  const updateSettings = api.settings.set.useMutation();
+
+  const {
+    update,
+    showErrorDialog,
+    setShowErrorDialog,
+    setPreviewDirty,
+    hiddenHandles,
+    setHiddenHandles,
+    toggleHiddenHandle,
+  } = usePipeLayer((state) => state);
 
   const { isLoading: isBlocksLoading, data: blocks } = api.blocks.list.useQuery(
     undefined,
@@ -182,13 +252,45 @@ export default function Home() {
   useEffect(() => {
     // Responsible for the initial loading from the server
     const workflow = workflows.data && workflows.data[0];
-    if (update && blocks && workflow) {
-      console.debug("---- EFFECT [Update workflow yaml] ----");
+
+    if (update && blocks && workflow && settings.isFetched && settings.data) {
+      console.debug("---- EFFECT [Update from server] ----");
       update(workflow, blocks);
       setPreviewDirty(true);
+      setHiddenHandles(
+        JSON.parse(settings.data.hiddenHandles as string) as EdgeHiddenHandles
+      );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [blocks, update, workflows.data]);
+
+  const toggleK8s = useCallback(() => {
+    toggleHiddenHandle("k8s");
+    updateSettings.mutate({ ...hiddenHandles, k8s: !hiddenHandles.k8s });
+  }, [hiddenHandles, toggleHiddenHandle, updateSettings]);
+
+  const toggleKafka = useCallback(() => {
+    toggleHiddenHandle("kafka");
+    updateSettings.mutate({ ...hiddenHandles, kafka: !hiddenHandles.kafka });
+  }, [hiddenHandles, toggleHiddenHandle, updateSettings]);
+
+  const toggleAvro = useCallback(() => {
+    toggleHiddenHandle("avro");
+    updateSettings.mutate({ ...hiddenHandles, avro: !hiddenHandles.avro });
+  }, [hiddenHandles, toggleHiddenHandle, updateSettings]);
+
+  const toggleTopic = useCallback(() => {
+    toggleHiddenHandle("topic");
+    updateSettings.mutate({ ...hiddenHandles, topic: !hiddenHandles.topic });
+  }, [hiddenHandles, toggleHiddenHandle, updateSettings]);
+
+  const togglePostgres = useCallback(() => {
+    toggleHiddenHandle("postgres");
+    updateSettings.mutate({
+      ...hiddenHandles,
+      postgres: !hiddenHandles.postgres,
+    });
+  }, [hiddenHandles, toggleHiddenHandle, updateSettings]);
 
   return (
     <>
@@ -226,6 +328,7 @@ export default function Home() {
               <b>Workflow name</b>
               <input
                 type="text"
+                title="Workflow name"
                 className="border-2"
                 value={createWorkflowName}
                 onChange={onCreateWorkflowNameChange}
@@ -285,6 +388,58 @@ export default function Home() {
                   </div>
                 ))}
             </div>
+            <div className="flex space-x-2">
+              <div>
+                <label>
+                  <input
+                    type="checkbox"
+                    onChange={toggleK8s}
+                    checked={!hiddenHandles.k8s}
+                  />{" "}
+                  provider-kubernetes
+                </label>
+              </div>
+              <div>
+                <label>
+                  <input
+                    type="checkbox"
+                    onChange={toggleKafka}
+                    checked={!hiddenHandles.kafka}
+                  />{" "}
+                  provider-kafka
+                </label>
+              </div>
+              <div>
+                <label>
+                  <input
+                    type="checkbox"
+                    onChange={toggleAvro}
+                    checked={!hiddenHandles.avro}
+                  />{" "}
+                  provider-contract
+                </label>
+              </div>
+              <div>
+                <label>
+                  <input
+                    type="checkbox"
+                    onChange={toggleTopic}
+                    checked={!hiddenHandles.topic}
+                  />{" "}
+                  kafka-topic
+                </label>
+              </div>
+              <div>
+                <label>
+                  <input
+                    type="checkbox"
+                    onChange={togglePostgres}
+                    checked={!hiddenHandles.postgres}
+                  />{" "}
+                  postgres
+                </label>
+              </div>
+            </div>
             <div className="flex w-full flex-1">
               <WorkflowProvider />
             </div>
@@ -306,12 +461,9 @@ function WorkflowProvider() {
     tab,
     setTab,
     nodes,
-    updatePreview,
-    setPreviewLoading,
     setPreviewDirty,
   } = usePipeLayer((state) => state);
   const saveWorkflow = api.workflow.set.useMutation();
-  const fetchPreview = api.pulumi.preview.useMutation();
 
   const editorDedup = useRef<NodeJS.Timeout>();
 
@@ -513,6 +665,7 @@ function BlockNode(node: NodeProps<NodeData>) {
     setSelectedNode,
     setShowEditor,
     setTab,
+    hiddenHandles,
   } = usePipeLayer((state) => state);
   const saveWorkflow = api.workflow.set.useMutation();
 
@@ -571,9 +724,96 @@ function BlockNode(node: NodeProps<NodeData>) {
     errorRing.push("border-2", "border-red-400");
   }
 
+  const isHidden = (type: ProvidedResourceType | "blank") => {
+    switch (type) {
+      case "data-contract":
+        return hiddenHandles.avro;
+      case "kafka-topic":
+        return hiddenHandles.topic;
+      case "postgres":
+        return hiddenHandles.postgres;
+      case "provider-kafka":
+        return hiddenHandles.kafka;
+      case "provider-kubernetes":
+        return hiddenHandles.k8s;
+    }
+  };
+
+  const in_handles = (block.configuration || []).reduce(
+    (p, conf) =>
+      p.concat(
+        conf.fields
+          .filter((field) => "direction" in field && field.direction === "in")
+          .map((field) => ({
+            id: ("provides" in field && field.provides) || "blank",
+            title: ("provides" in field && field.provides) || "blank",
+          }))
+      ),
+    block.provides?.map((provides) => ({
+      id: provides,
+      title: provides,
+      provides: true,
+    })) ||
+      ([] as {
+        id: ProvidedResourceType | "blank";
+        title: string;
+        provides?: boolean;
+      }[])
+  );
+  const total_in_handles = in_handles.length;
+
+  const out_handles = (block.configuration || []).reduce(
+    (p, conf) =>
+      p.concat(
+        conf.fields
+          .filter((field) => "direction" in field && field.direction === "out")
+          .map((field) => ({
+            id: ("provides" in field && field.provides) || "blank",
+            title: ("provides" in field && field.provides) || "blank",
+          }))
+      ),
+    block.provides?.map((provides) => ({
+      id: provides,
+      title: provides,
+      provides: true,
+    })) ||
+      ([] as {
+        id: ProvidedResourceType | "blank";
+        title: string;
+        provides?: boolean;
+      }[])
+  );
+  const total_out_handles = out_handles.length;
+
   return (
     <>
-      <Handle type="target" position={Position.Left} />
+      {in_handles.map((handle, idx) => {
+        return (
+          <Handle
+            key={`handle_in_${idx}`}
+            type="target"
+            id={handle.id}
+            title={handle.title}
+            position={Position.Left}
+            style={{
+              top: `${
+                total_in_handles > 1 ? (idx / (total_in_handles - 1)) * 100 : 50
+              }%`,
+              left: handle.provides ? -15 : -10,
+              visibility: isHidden(handle.id) ? "hidden" : "visible",
+            }}
+          >
+            <div
+              className={`absolute ${
+                handle.provides ? "border-dashed" : "border-solid"
+              } left-[5px] top-[-11.5px] mt-2 h-[10px] border-[1px] border-black text-xs ${getBlockStyle(
+                handle.id
+              )}`}
+              style={{ width: handle.provides ? 15 : 10 }}
+            />
+          </Handle>
+        );
+      })}
       <div className={errorRing.join(" ")}>
         <div
           className={selectRing.join(" ")}
@@ -602,7 +842,7 @@ function BlockNode(node: NodeProps<NodeData>) {
             </div>
           )}
           <div className="absolute -top-6 right-[-3px]">
-            <button onClick={deleteNode}>
+            <button onClick={deleteNode} title="Delete">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 fill="none"
@@ -621,7 +861,35 @@ function BlockNode(node: NodeProps<NodeData>) {
           </div>
         </div>
       </div>
-      <Handle type="source" position={Position.Right} />
+      {out_handles.map((handle, idx) => {
+        return (
+          <Handle
+            key={`handle_out_${idx}}`}
+            type="source"
+            title={handle.title}
+            id={handle.id}
+            position={Position.Right}
+            style={{
+              top: `${
+                total_out_handles > 1
+                  ? (idx / (total_out_handles - 1)) * 100
+                  : 50
+              }%`,
+              right: handle.provides ? -15 : -10,
+              visibility: isHidden(handle.id) ? "hidden" : "visible",
+            }}
+          >
+            <div
+              className={`absolute ${
+                handle.provides ? "border-dashed" : "border-solid"
+              } -top-[11.5px] right-[5px] mt-2 h-[10px] border-[1px] border-black text-xs ${getBlockStyle(
+                handle.id
+              )}`}
+              style={{ width: handle.provides ? 15 : 10 }}
+            />
+          </Handle>
+        );
+      })}
     </>
   );
 }
@@ -719,7 +987,7 @@ function Flow() {
       console.debug("-- onEdgeUpdate --");
       edgeUpdateSuccessful.current = true;
       const newEdges = updateEdge(oldEdge, newConnection, edges);
-      const updatedNodes = topicLinkNodesFromEdges(nodes, newEdges);
+      const updatedNodes = updateWorkflowFromEdges(nodes, newEdges);
       updateNodeAndEdges(updatedNodes, newEdges);
       saveWorkflow.mutate(
         Object.assign({}, workflow, { yaml: flowToYaml(updatedNodes) })
@@ -733,7 +1001,7 @@ function Flow() {
       console.debug("-- onEdgeUpdateEnd --");
       if (!edgeUpdateSuccessful.current) {
         const newEdges = edges.filter((e) => e.id !== edge.id);
-        const updatedNodes = topicLinkNodesFromEdges(nodes, newEdges);
+        const updatedNodes = updateWorkflowFromEdges(nodes, newEdges);
         updateNodeAndEdges(updatedNodes, newEdges);
         saveWorkflow.mutate(
           Object.assign({}, workflow, { yaml: flowToYaml(updatedNodes) })
@@ -747,16 +1015,16 @@ function Flow() {
   const onConnect = useCallback(
     (conn: Connection) => {
       console.debug("--- onConnect ---");
-      if (!isValidConnection(conn, nodes)) return false;
       conn = Object.assign({}, conn, {
-        markerEnd: { type: MarkerType.ArrowClosed },
-        type: "smoothstep",
-        style: {
-          strokeWidth: 2,
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          color: edgeColors[conn.sourceHandle as ProvidedResourceType],
         },
+        type: edgeType,
+        style: edgeStyles[conn.sourceHandle as ProvidedResourceType],
       });
       const newEdges = addEdge(conn, edges);
-      const updatedNodes = topicLinkNodesFromEdges(nodes, newEdges);
+      const updatedNodes = updateWorkflowFromEdges(nodes, newEdges);
       updateNodeAndEdges(updatedNodes, newEdges);
       saveWorkflow.mutate(
         Object.assign({}, workflow, { yaml: flowToYaml(updatedNodes) })
@@ -867,10 +1135,11 @@ function Flow() {
           onEdgeUpdate={onEdgeUpdate}
           onEdgeUpdateEnd={onEdgeUpdateEnd}
           onConnect={onConnect}
+          isValidConnection={isValidConnection}
           onDragOver={onDragOver}
           onDrop={onDrop}
           nodeTypes={nodeTypes}
-          connectionLineType={ConnectionLineType.SmoothStep}
+          connectionLineComponent={ConnectionLine}
           fitView
           onClick={onEmptyClick}
         >
@@ -891,6 +1160,8 @@ function AuthShowcase() {
   const fetchRefresh = api.pulumi.refresh.useMutation();
   const fetchDestroy = api.pulumi.destroy.useMutation();
   const cancelDeploy = api.pulumi.cancel.useMutation();
+
+  const restart = api.workflow.restart.useMutation();
 
   const {
     busy,
@@ -925,6 +1196,8 @@ function AuthShowcase() {
       document.body.removeEventListener("click", closeButtons);
     };
   }, []);
+
+  const onRestartClick = useCallback(() => restart.mutate(), [restart]);
 
   const showDeployModal = useCallback(
     (show: boolean) => () => {
@@ -1147,6 +1420,19 @@ function AuthShowcase() {
                   Destroy
                 </button>
               </li>
+              <li>
+                <div className="divider pointer-events-none m-0 p-2" />
+              </li>
+              <li>
+                <button
+                  className="disabled:opacity-40"
+                  onClick={onRestartClick}
+                  disabled={busy}
+                >
+                  <ArrowPathIcon className="h-5 w-5" />
+                  Restart
+                </button>
+              </li>
             </ul>
           </details>
 
@@ -1273,17 +1559,25 @@ function AuthShowcase() {
                   <InformationCircleIcon className="h-6 w-6" />
                   Deployment failure.
                 </div>
-                <ul className="max-h-[500px] overflow-scroll">
+                <pre className="m-auto max-h-[500px] w-11/12 overflow-scroll">
                   {up.diagnostics
                     .reduce((p, c) => {
-                      if (!p.includes(`${c.prefix || ""} ${c.message}`))
-                        p.push(`${c.prefix || ""} ${c.message}`);
+                      if (
+                        !p.includes(
+                          `${c.urn || ""}\n\n${c.prefix || ""} ${c.message}`
+                        )
+                      )
+                        p.push(
+                          `${c.urn || ""}\n\n${c.prefix || ""} ${c.message}`
+                        );
                       return p;
                     }, [] as string[])
                     .map((message, idx) => (
-                      <li key={idx}>{message}</li>
+                      <p className="" key={idx}>
+                        {message}
+                      </p>
                     ))}
-                </ul>
+                </pre>
               </div>
               <div className="modal-action">
                 <form method="dialog" className="space-x-2">

@@ -15,6 +15,7 @@ import {
   type BlockConfiguration,
   type NodeDataPayloadPrivateStorage,
   type BlockConfigurationField,
+  type ProvidedResourceType,
 } from "~/types";
 
 import ModelTheme from "survey-core/themes/flat-light-panelless";
@@ -27,57 +28,62 @@ const NODE_START_POSITION = {
   y: 5,
 };
 
-const isWorkerNode = (node?: Node<NodeData>) =>
-  node &&
-  node.type === "blockNode" &&
-  (node.data.block.type === "worker" || node.data.block.type === "gpu-worker");
-
-const isTopicNode = (node?: Node<NodeData>) =>
-  node && node.type === "blockNode" && node.data.payload.type === "topic";
-
-const isValidConnection = (conn: Connection, nodes: Node[]) => {
-  const source = nodes.find((n) => n.id === conn.source);
-  const target = nodes.find((n) => n.id == conn.target);
-
-  return (
-    (isWorkerNode(source) && isTopicNode(target)) ||
-    (isTopicNode(source) && isWorkerNode(target))
-  );
+const isValidConnection = (conn: Connection) => {
+  return conn.sourceHandle === conn.targetHandle;
+  return false;
 };
 
-const add_topic_array = (
+const update_connected_field_values = (
   payload: NodeDataPayload<unknown>,
   prop: "producer.topics" | "consumer.topics",
-  sources: (Node<NodeData> | undefined)[]
+  sources: (Node<NodeData> | undefined)[],
+  type: "multiple" | "dropdown"
 ) => {
-  const topics: string[] = [];
+  const values: string[] = [];
   for (const source of sources) {
-    if (source) topics.push(source.data.payload.name);
+    if (source) values.push(source.data.payload.name);
   }
-  payload[prop] = topics.length > 0 ? topics : undefined;
+  payload[prop] =
+    values.length > 0
+      ? type === "dropdown"
+        ? (values[0] as unknown as string[])
+        : values
+      : undefined;
 };
 
-const topicLinkNodesFromEdges = (
+const updateWorkflowFromEdges = (
   nodes: Node<NodeData>[],
   edges: Edge[]
 ): Node[] => {
   return nodes.map((node) => {
-    if (node.type === "blockNode") {
-      if (isWorkerNode(node)) {
-        const nn = Object.assign({}, node);
-        const producers = edges
-          .filter((e) => e.source === nn.id)
-          .map((e) => nodes.find((n) => n.id === e.target));
-        const consumers = edges
-          .filter((e) => e.target === nn.id)
-          .map((e) => nodes.find((n) => n.id === e.source));
-
-        add_topic_array(nn.data.payload, "producer.topics", producers);
-        add_topic_array(nn.data.payload, "consumer.topics", consumers);
-
-        nn.data.model.data = nn.data.payload;
-        return nn;
-      }
+    const fields = node.data.block.configuration?.reduce(
+      (p, conf) =>
+        p.concat(
+          conf.fields.filter((field) => "provides" in field && field.provides)
+        ),
+      [] as BlockConfigurationField<unknown>[]
+    );
+    if (fields) {
+      const nn = Object.assign({}, node);
+      fields.forEach((field) => {
+        if ("direction" in field) {
+          const dir = field.direction === "in" ? "target" : "source";
+          const odir = dir === "target" ? "source" : "target";
+          const links = edges
+            .filter(
+              (e) => e[dir] === node.id && e.sourceHandle === field.provides
+            )
+            .map((e) => nodes.find((n) => n.id === e[odir]));
+          update_connected_field_values(
+            nn.data.payload,
+            field.name,
+            links,
+            field.type
+          );
+          nn.data.model.data = nn.data.payload;
+        }
+      });
+      return nn;
     }
     return node;
   });
@@ -180,6 +186,25 @@ const flowToYaml = (nodes: Node<NodeData>[]): string => {
   return doc.toString();
 };
 
+const edgeColors: { [key in ProvidedResourceType]: string } = {
+  ["kafka-topic"]: "orange",
+  ["provider-kubernetes"]: "lime",
+  ["provider-kafka"]: "blue",
+  ["data-contract"]: "orangered",
+  postgres: "blueviolet",
+};
+
+const edgeStyles: { [key in ProvidedResourceType]: React.CSSProperties } = {
+  ["kafka-topic"]: { strokeWidth: 2, stroke: edgeColors["kafka-topic"] },
+  ["provider-kubernetes"]: {
+    strokeWidth: 1,
+    stroke: edgeColors["provider-kubernetes"],
+  },
+  ["provider-kafka"]: { strokeWidth: 1, stroke: edgeColors["provider-kafka"] },
+  ["data-contract"]: { strokeWidth: 1, stroke: edgeColors["data-contract"] },
+  postgres: { strokeWidth: 1, stroke: edgeColors["postgres"] },
+};
+
 const createFieldEdge = (
   node: Node<NodeData>,
   field: BlockConfigurationField<unknown>,
@@ -194,17 +219,23 @@ const createFieldEdge = (
     : [node.data.payload[field.name]];
 
   names.forEach((name) => {
-    const linked = nodes.find((n) => n.data.payload.name === name)?.id;
+    const linked = nodes.find((n) => n.data.payload.name === name);
     if (!linked) return; // TODO; handle validation error
-    const edge_id = `${subject}--${field.direction}--${linked}`;
+    const edge_id = `${subject}--${field.direction}--${linked.id}`;
+
+    if (edges.map((edge) => edge.id).includes(edge_id)) return;
+
     edges.push({
       id: edge_id,
-      source: field.direction === "in" ? linked : subject,
-      target: field.direction === "in" ? subject : linked,
-      markerEnd: { type: MarkerType.ArrowClosed },
-      style: {
-        strokeWidth: 2,
+      source: field.direction === "in" ? linked.id : subject,
+      sourceHandle: field.provides,
+      target: field.direction === "in" ? subject : linked.id,
+      targetHandle: field.provides,
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: edgeColors[field.provides],
       },
+      style: edgeStyles[field.provides],
       type: edgeType,
     });
   });
@@ -267,120 +298,6 @@ const createNode = (
 
   return ret;
 };
-
-// const isMapEmpty = (path: string[], node: any) =>
-//   !node.getIn ||
-//   !node.hasIn(path) ||
-//   !node.getIn(path) ||
-//   !node.getIn(path).items ||
-//   node.getIn(path).items.length === 0 ||
-//   node.getIn(path).items[0].value === null;
-
-// const validatePipelayerYaml = (yaml: string, strict?: boolean) => {
-//   const doc = YAML.parseDocument<any>(yaml);
-//   // Validation
-//   const contents = doc.contents;
-//   if (!contents) {
-//     throw new Error("Empty document");
-//   }
-//   if (!contents.has("main")) {
-//     throw new Error("No main defined!");
-//   }
-
-//   const topics: string[] = [];
-
-//   if (
-//     contents.hasIn(["main", "topics"]) &&
-//     contents.getIn(["main", "topics"], true).items
-//   ) {
-//     contents.getIn(["main", "topics"], true).items.forEach((topic) => {
-//       const line =
-//         (yaml.slice(0, topic.key.range[0]).match(/\n/g)?.length || 0) + 1;
-//       if (!topic.value) {
-//         throw new Error(
-//           `Malformed topic on line ${line} near "${topic.key.source}"`
-//         );
-//         // } else if (
-//         //   topic.value.value !== null &&
-//         //   topic.value.constructor.name !== "YAMLMap"
-//         // ) {
-//         //   throw new Error(
-//         //     `Malformed topic map on line ${line} near "${topic.key.source}"`
-//         //   );
-//       }
-//       topics.push(topic.key.value);
-//     });
-//   }
-
-//   if (
-//     contents.hasIn(["main", "flows"]) &&
-//     contents.getIn(["main", "flows"], true).items
-//   ) {
-//     contents.getIn(["main", "flows"], true).items.forEach((flow: any) => {
-//       if (flow.value === null) {
-//         const line =
-//           (yaml.slice(0, flow.range[0]).match(/\n/g)?.length || 0) + 1;
-//         throw new Error(`Malformed flow on line ${line} near "${flow.source}"`);
-//       }
-//       contents.getIn(["main", "flows"], true).items.forEach((node: any) => {
-//         const line =
-//           (yaml.slice(0, node.range[0]).match(/\n/g)?.length || 0) + 1;
-//         if (
-//           !node.get ||
-//           (node.value && node.value.constructor.name !== "YAMLMap")
-//         ) {
-//           throw new Error(
-//             `Malformed flow object on line ${line} near "${node.source}"`
-//           );
-//         }
-//         if (node.value !== null && !node.get("name")) {
-//           throw new Error(`Flow is missing name property, line ${line}.`);
-//         }
-//         if (strict && isMapEmpty(["consumer", "topics"], node)) {
-//           throw new Error(`flow has no consumer topics, line ${line}.`);
-//         }
-//         if (!isMapEmpty(["consumer", "topics"], node)) {
-//           node.getIn(["consumer", "topics"]).items.forEach((topic: any) => {
-//             if (topic.items) {
-//               if (!topics.includes(topic.items[0].key.value)) {
-//                 throw new Error(
-//                   `producer references topic ${topic.value} but topic does not exist, line ${line}.`
-//                 );
-//               }
-//               return;
-//             }
-//             if (!topics.includes(topic.value)) {
-//               throw new Error(
-//                 `consumer references topic ${topic.value} but topic does not exist, line ${line}.`
-//               );
-//             }
-//           });
-//         }
-//         if (strict && isMapEmpty(["producer", "topics"], node)) {
-//           throw new Error(`flow has no producer topics, line ${line}.`);
-//         }
-//         if (!isMapEmpty(["producer", "topics"], node)) {
-//           node.getIn(["producer", "topics"]).items.forEach((topic: any) => {
-//             if (topic.items) {
-//               if (!topics.includes(topic.items[0].key.value)) {
-//                 throw new Error(
-//                   `producer references topic ${topic.value} but topic does not exist, line ${line}.`
-//                 );
-//               }
-//               return;
-//             }
-//             if (!topics.includes(topic.value)) {
-//               throw new Error(
-//                 `producer references topic ${topic.value} but topic does not exist, line ${line}.`
-//               );
-//             }
-//           });
-//         }
-//       });
-//     });
-//     // throw new Error("No topics steps defined!");
-//   }
-// };
 
 const withoutBlockDefaults = (
   payload: NodeDataPayload<unknown>,
@@ -468,7 +385,7 @@ const yamlToFlow = (
     node.data.block.configuration?.forEach((conf) => {
       conf.fields.forEach((field) => {
         if (field.type === "multiple" || field.type === "dropdown") {
-          if ("provides" in field && field.provides === "kafka-topic") {
+          if ("provides" in field) {
             createFieldEdge(node, field, nodes, edges);
           }
         }
@@ -479,118 +396,8 @@ const yamlToFlow = (
   return { nodes, edges };
 };
 
-// const addYaml = (yaml: string, path: string[], doc: any) => {
-//   const blk = YAML.parseDocument(yaml);
-//   const key = blk.contents.items[0].key.value;
-//   doc.addIn(path.concat(key), "tmp");
-//   const parent = doc.getIn(path);
-//   parent.items[parent.items.length - 1] = blk.contents.items[0];
-//   return key;
-// };
-
-// const toDocker = (yaml: string) => {
-//   const workflow = YAML.parseDocument<any>(yaml);
-//   const contents = workflow.contents;
-//   if (!contents) throw new Error("Empty document");
-
-//   const compose = {
-//     version: "3.8",
-//     services: {},
-//     networks: { backend: { name: "backend" } },
-//   };
-//   const doc = new Document(compose);
-
-//   // TODO: link depends_on based on flow
-
-//   const topics: string[] = [];
-//   contents.getIn(["main", "topics"])?.items?.forEach((topic) => {
-//     topics.push(topic.key.value);
-//   });
-
-//   let last_main_service = "";
-
-//   if (contents.has("main")) {
-//     for (const unit in mainUnit) {
-//       if (!unit.startsWith("__")) {
-//         last_main_service = addYaml(
-//           mainUnit[unit]({ topics }),
-//           ["services"],
-//           doc
-//         );
-//       }
-//     }
-
-//     doc.contents.get("services", true).commentBefore = mainUnit.__comment();
-
-//     if (contents.hasIn(["main", "flows"])) {
-//       // services.get(services.items.length - 1, true).value.comment = workerUnit.__comment();
-//       doc.getIn(["services", last_main_service], true).comment =
-//         workerUnit.__comment();
-
-//       // services.items[services.items.length - 1].value.comment= workerUnit.__comment();
-
-//       contents.getIn(["main", "flows"], true)?.items?.forEach((flow) => {
-//         const name = flow.get("name");
-//         if (flow.hasIn(["worker", "type"])) {
-//           const type = flow.getIn(["worker", "type"]);
-//           if (type === "python") {
-//             addYaml(workerUnit.python({ name }), ["services"], doc);
-//           } else if (type === "pytorch") {
-//             const device_ids = flow.get("device_ids") || ["0"];
-//             addYaml(
-//               workerUnit.pytorch({ name, device_ids }),
-//               ["services"],
-//               doc
-//             );
-//           }
-//         }
-//       });
-//     }
-
-//     // if (contents.hasIn(["main", "workers"])) {
-//     //   // services.get(services.items.length - 1, true).value.comment = workerUnit.__comment();
-//     //   doc.getIn(["services", last_main_service], true).comment =
-//     //     workerUnit.__comment();
-
-//     //   // services.items[services.items.length - 1].value.comment= workerUnit.__comment();
-
-//     //   contents.getIn(["main", "workers"], true)?.items.forEach((worker) => {
-//     //     // if (worker.get("type")) {
-//     //     const name = worker.key.value;
-//     //     if (worker.value.has("type")) {
-//     //       if (worker.value.get("type") === "python") {
-//     //         addYaml(workerUnit.python({ name }), ["services"], doc);
-//     //       } else if (worker.value.get("type") === "pytorch") {
-//     //         const device_ids = worker.value.get("device_ids") || ["0"];
-//     //         addYaml(
-//     //           workerUnit.pytorch({ name, device_ids }),
-//     //           ["services"],
-//     //           doc
-//     //         );
-//     //       }
-//     //     }
-//     //     // }
-//     //   });
-//     // }
-//   }
-
-//   doc.contents.get("networks", true).commentBefore = `
-// ################################################################################
-
-//   networks
-//   - backend
-
-// ################################################################################`;
-//   doc.contents.commentBefore = `
-//   This file was automatically generated by PipeLayer.
-
-//   Its contents cannot be modified within this interface.
-//   `;
-//   return doc.toString();
-// };
-
 export {
-  topicLinkNodesFromEdges,
+  updateWorkflowFromEdges,
   yamlToFlow,
   flowToYaml,
   withBlockDefaults,
@@ -600,4 +407,7 @@ export {
   isValidConnection,
   getPrivateData,
   createNode,
+  edgeStyles,
+  edgeColors,
+  edgeType,
 };

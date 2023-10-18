@@ -82,7 +82,7 @@ const Block: BlockConfig<PlatformPipelayerConfiguration> = {
           required: true,
           type: "multiple",
           provides: "provider-kubernetes",
-          direction: "in",
+          direction: "out",
         },
       ],
     },

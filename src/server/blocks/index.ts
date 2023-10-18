@@ -12,6 +12,7 @@ import PipelayerBlock from "./platform/pipelayer";
 import TopicBlock from "./topic";
 import GcpBlock from "./cloud/gcp";
 import AzureBlock from "./cloud/azure";
+import K8sBlock from "./cloud/kubernetes";
 import AvroBlock from "./avro";
 import DedupByIdBlock from "./gphin/dedup_by_id";
 import SentenceSegmentation from "./gphin/sentence_segmentation";
@@ -24,6 +25,7 @@ import TextSummarizerBlock from "./gphin/text_summarizer";
 export const blocks = [
   GcpBlock,
   AzureBlock,
+  K8sBlock,
   PipelayerBlock,
   TopicBlock,
   AvroBlock,
@@ -44,7 +46,7 @@ type Volume = {
   configMap?: pulumi.Input<string>;
   emptyDir?: kubernetes.types.input.core.v1.EmptyDirVolumeSource;
   nfs?: pulumi.Input<kubernetes.types.input.core.v1.NFSVolumeSource>;
-  filestore?: boolean;
+  readWriteMany?: boolean;
   pvc?: pulumi.Input<string>;
 };
 
@@ -53,6 +55,7 @@ interface DeploymentOptions {
   name: string;
   replicas?: number;
   enableServiceLinks?: boolean;
+  tolerations?: kubernetes.types.input.core.v1.Toleration[];
   containers: {
     name?: string;
     securityContext?: kubernetes.types.input.core.v1.SecurityContext;
@@ -154,9 +157,9 @@ export function createPvc(
             },
           },
           spec: {
-            accessModes: [volume.filestore ? "ReadWriteMany" : "ReadWriteOnce"],
-            storageClassName: volume.filestore
-              ? "filestore-pipelayer"
+            accessModes: [volume.readWriteMany ? "ReadWriteMany" : "ReadWriteOnce"],
+            storageClassName: volume.readWriteMany
+              ? "pipelayer-readwritemany"
               : undefined,
             resources: {
               requests: {
@@ -207,6 +210,7 @@ export function createDeployment(
             labels: appLabels,
           },
           spec: {
+            tolerations: deploymentOptions.tolerations,
             enableServiceLinks: deploymentOptions.enableServiceLinks,
             hostname: deploymentOptions.name,
             restartPolicy: "Always",

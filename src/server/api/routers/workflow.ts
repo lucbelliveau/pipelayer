@@ -17,24 +17,12 @@ const emptyWorkflow = `main:
 `;
 
 export const workflowRouter = createTRPCRouter({
+  restart: protectedProcedure.mutation(() => {
+    process.exit();
+  }),
   getAll: protectedProcedure.query(({ ctx }) => {
     const user = ctx.session.user;
     return ctx.prisma.workflow.findMany({ where: { userId: user.id } });
-  }),
-
-  // get: protectedProcedure.query(async () => {
-  get: publicProcedure.query(() => {
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir);
-      console.info(`Created [${dataDir}] directory.`);
-    }
-
-    if (!fs.existsSync(workflowFile)) {
-      fs.writeFileSync(workflowFile, emptyWorkflow, "binary");
-    }
-
-    const f = fs.readFileSync(workflowFile, "binary");
-    return f;
   }),
 
   set: protectedProcedure

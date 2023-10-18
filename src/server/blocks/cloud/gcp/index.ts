@@ -359,10 +359,10 @@ users:
   );
 
   new kubernetes.storage.v1.StorageClass(
-    "filestore-pipelayer",
+    "pipelayer-readwritemany",
     {
       metadata: {
-        name: "filestore-pipelayer",
+        name: "pipelayer-readwritemany",
       },
       provisioner: "filestore.csi.storage.gke.io",
       volumeBindingMode: "Immediate",

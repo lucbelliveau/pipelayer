@@ -1,6 +1,6 @@
 import fs from "fs";
 import { parse } from "url";
-import { resolve } from "path";
+import { resolve, sep, posix } from "path";
 
 import { LocalWorkspace, type PulumiFn } from "@pulumi/pulumi/automation";
 
@@ -13,7 +13,7 @@ export const getStack = async (program: PulumiFn) => {
   if (parsedBackend.protocol === "file:" && parsedBackend.path) {
     
     // Use an absolute path for the backend location.
-    const stateDir = resolve(parsedBackend.path);
+    const stateDir = resolve(parsedBackend.path).split(sep).join(posix.sep);
 
     if (!fs.existsSync(stateDir)) {
       fs.mkdirSync(stateDir);
