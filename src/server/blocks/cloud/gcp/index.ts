@@ -116,7 +116,7 @@ const program = async (
   );
 
   // Enable Cloud Filestore API
-  const file_api = new gcp.projects.Service(
+  new gcp.projects.Service(
     "file-api",
     {
       disableDependentServices: true,
@@ -126,7 +126,7 @@ const program = async (
     provider(gcp_provider, options)
   );
 
-  // Enable Cloud Filestore API
+  // Enable resource manager API
   const resource_manager_api = new gcp.projects.Service(
     "resource-manager-api",
     {

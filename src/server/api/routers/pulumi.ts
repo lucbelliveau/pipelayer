@@ -149,7 +149,7 @@ const getLinkedResources = (
   return ret;
 };
 
-const yamlToProgram = (
+export const yamlToProgram = (
   workflow: Workflow,
   blocks: BlockConfig[],
   options?: pulumi.ResourceOptions

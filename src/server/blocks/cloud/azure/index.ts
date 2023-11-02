@@ -4,7 +4,7 @@ import * as kubernetes from "@pulumi/kubernetes";
 import { local } from "@pulumi/command";
 
 import { type ResourceOptions } from "@pulumi/pulumi";
-import { dependsOn, provider } from "../../utils";
+import { provider } from "../../utils";
 import {
   type StackPrepare,
   type BlockConfig,
@@ -80,30 +80,6 @@ const program = async (
 
   const rg = new azure.resources.ResourceGroup(resourceGroupName);
 
-  // const factiva_storage = new azure.storage.StorageAccount(
-  //   "factiva",
-  //   {
-  //     location,
-  //     resourceGroupName: rg.name,
-  //     kind: azure.storage.Kind.StorageV2,
-  //     sku: {
-  //       name: azure.storage.SkuName.Standard_LRS,
-  //     },
-  //     tags,
-  //   },
-  //   azure_options
-  // );
-
-  // new azure.storage.BlobContainer(
-  //   "factiva-articles",
-  //   {
-  //     containerName: "articles",
-  //     accountName: factiva_storage.name,
-  //     resourceGroupName: rg.name,
-  //   },
-  //   azure_options
-  // );
-
   const cluster = new azure.containerservice.ManagedCluster(
     "k8s-cluster",
     {
@@ -144,14 +120,14 @@ const program = async (
     azure_options
   );
 
-  // new local.Command(
-  //   "create-gpu-node-pool",
-  //   {
-  //     create: pulumi.interpolate`az aks nodepool add --resource-group ${rg.name} --cluster-name ${cluster.name} --name gpu --node-count ${nodeCountGpu} --node-vm-size standard_nc6s_v3 --node-taints sku=gpu:NoSchedule --aks-custom-headers UseGPUDedicatedVHD=true`,
-  //     delete: "az aks nodepool delete gpu",
-  //   },
-  //   { deleteBeforeReplace: true }
-  // );
+  new local.Command(
+    "create-gpu-node-pool",
+    {
+      create: pulumi.interpolate`az aks nodepool add --resource-group ${rg.name} --cluster-name ${cluster.name} --name gpu --node-count ${nodeCountGpu} --node-vm-size standard_nc6s_v3 --node-taints sku=gpu:NoSchedule --aks-custom-headers UseGPUDedicatedVHD=true`,
+      delete: "az aks nodepool delete gpu",
+    },
+    { deleteBeforeReplace: true }
+  );
 
   const creds = azure.containerservice.listManagedClusterUserCredentialsOutput(
     {

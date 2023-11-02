@@ -54,6 +54,10 @@ export interface BlockConfigurationFieldBoolean {
   default?: boolean;
 }
 
+export interface BlockConfigurationFieldKeyValueList {
+  type: "keyvalue-list";
+  default?: { keyvalue: { key: string; value: string } }[];
+}
 
 export type FlowDirection = "in" | "out" | "bidirectional";
 export type BlockConfigurationFieldMultiple = {
@@ -84,12 +88,14 @@ export type BlockConfigurationField<
     | BlockConfigurationFieldMultiple
     | BlockConfigurationFieldDropdown
     | BlockConfigurationFieldBoolean
+    | BlockConfigurationFieldKeyValueList
 > = {
   name: keyof Name | Concat<[keyof Name, "@private"]>;
   description?: string;
   title: string;
   required?: boolean;
   validators?: BlockConfigurationFieldValidator[];
+  visibleIf?: string;
 } & T;
 
 export type BlockTypes =
@@ -109,35 +115,39 @@ export type SurveyJSModelElementValidator = { text: string } & (
   | { type: "numeric" }
 );
 
-export interface SurveyJSModelElementTextSchema {
+export interface SurveyJSModelElementBase {
   name: string;
   title: string;
-  type: "text";
   isRequired?: boolean;
   requiredErrorText?: string;
   validators?: SurveyJSModelElementValidator[];
   description?: string;
+  visibleIf?: string;
+}
+
+export interface SurveyJSModelElementTextSchema {
+  type: "text";
 }
 
 export interface SurveyJSModelElementCommentSchema {
-  name: string;
-  title: string;
   type: "comment";
-  isRequired?: boolean;
-  requiredErrorText?: string;
-  validators?: SurveyJSModelElementValidator[];
-  description?: string;
 }
 
 export interface SurveyJSModelElementBooleanSchema {
-  name: string;
-  title: string;
   type: "boolean";
-  isRequired?: boolean;
-  requiredErrorText?: string;
-  description?: string;
 }
 
+export interface SurveyJSModelElementKeyValueListSchema {
+  type: "paneldynamic";
+  templateElements: {
+    type: "multipletext";
+    name: string;
+    items: {
+      name: string;
+      title: string;
+    }[];
+  }[];
+}
 
 export type SurveyJSModelElementNumberSchema =
   SurveyJSModelElementTextSchema & {
@@ -152,38 +162,20 @@ export type SurveyJSModelElementPasswordSchema =
   };
 
 export interface SurveyJSModelElementMultipleSchema {
-  name: string;
-  title: string;
   type: "tagbox";
-  isRequired?: boolean;
-  requiredErrorText?: string;
-  validators?: SurveyJSModelElementValidator[];
   choices?: string[];
-  description?: string;
 }
 
 export interface SurveyJSModelElementDropdownSchema {
-  name: string;
-  title: string;
   type: "dropdown";
-  isRequired?: boolean;
-  requiredErrorText?: string;
-  validators?: SurveyJSModelElementValidator[];
   choices?: string[];
-  description?: string;
 }
 
 export interface SurveyJSModelElementSigninSchema {
-  name: string;
-  title: string;
   type: "signin-google";
-  isRequired?: boolean;
-  requiredErrorText?: string;
-  validators?: SurveyJSModelElementValidator[];
-  description?: string;
 }
 
-export type SurveyJSModelElementSchema =
+export type SurveyJSModelElementSchema = (
   | SurveyJSModelElementTextSchema
   | SurveyJSModelElementNumberSchema
   | SurveyJSModelElementPasswordSchema
@@ -191,7 +183,17 @@ export type SurveyJSModelElementSchema =
   | SurveyJSModelElementMultipleSchema
   | SurveyJSModelElementDropdownSchema
   | SurveyJSModelElementSigninSchema
-  | SurveyJSModelElementBooleanSchema;
+  | SurveyJSModelElementBooleanSchema
+  | SurveyJSModelElementKeyValueListSchema
+) & {
+  name: string;
+  title: string;
+  isRequired?: boolean;
+  requiredErrorText?: string;
+  validators?: SurveyJSModelElementValidator[];
+  description?: string;
+  visibleIf?: string;
+};
 
 export interface SurveyJSModelSchemaPage {
   name: string;

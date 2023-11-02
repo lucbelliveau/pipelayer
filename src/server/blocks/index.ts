@@ -10,6 +10,7 @@ import { type ResourceOptions } from "@pulumi/pulumi";
 
 import PipelayerBlock from "./platform/pipelayer";
 import TopicBlock from "./topic";
+import WorkerBlock from "./worker";
 import GcpBlock from "./cloud/gcp";
 import AzureBlock from "./cloud/azure";
 import K8sBlock from "./cloud/kubernetes";
@@ -28,6 +29,7 @@ export const blocks = [
   K8sBlock,
   PipelayerBlock,
   TopicBlock,
+  WorkerBlock,
   AvroBlock,
   DedupByIdBlock,
   DedupByContentBlock,

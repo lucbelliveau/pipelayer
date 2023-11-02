@@ -1,20 +1,9 @@
-import fs from "fs";
-import path from "path";
-
 import { z } from "zod";
 
 import {
   createTRPCRouter,
-  publicProcedure,
   protectedProcedure,
 } from "~/server/api/trpc";
-
-const dataDir = path.resolve("./data");
-const workflowFile = path.join(dataDir, "pipelayer.yaml");
-const emptyWorkflow = `main:
-   flows:
-   topics:
-`;
 
 export const workflowRouter = createTRPCRouter({
   restart: protectedProcedure.mutation(() => {

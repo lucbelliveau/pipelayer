@@ -1,34 +1,33 @@
-import type * as pulumi from "@pulumi/pulumi";
 import * as kubernetes from "@pulumi/kubernetes";
 
-import { type ResourceOptions } from "@pulumi/pulumi";
 import {
-  type StackPrepare,
   type BlockConfig,
   type BlockConfiguration,
   type ProvidedResourceReturn,
-  type ProvidedResource,
-  type StackContext,
 } from "~/types";
 
 import logo from "./logo.png";
 
-type GoogleCloudConfiguration = BlockConfiguration<{
+type KubernetesConfiguration = BlockConfiguration<{
+  useLocal: boolean;
   kubeconfig: string;
+  namespace: string;
 }>;
 
 const program = async (
-  config: GoogleCloudConfiguration,
+  config: KubernetesConfiguration
   // eslint-disable-next-line @typescript-eslint/require-await
 ) => {
-  const {
-    kubeconfig
-  } = config;
+  const { kubeconfig, namespace } = config;
 
-  const k8s_provider = new kubernetes.Provider(
-    "gke",
-    { kubeconfig },
-  );
+  const k8s_provider = new kubernetes.Provider("k8s", {
+    kubeconfig,
+    namespace,
+  });
+
+  new kubernetes.core.v1.Namespace("k8s-namespace", {
+    metadata: { name: namespace },
+  }, { provider: k8s_provider});
 
   // consider using rook.io or something
   // new kubernetes.storage.v1.StorageClass(
@@ -60,7 +59,7 @@ const program = async (
   } as ProvidedResourceReturn;
 };
 
-const Block: BlockConfig<GoogleCloudConfiguration> = {
+const Block: BlockConfig<KubernetesConfiguration> = {
   name: "Kubernetes",
   type: "cloud",
   label: "Kubernetes",
@@ -71,12 +70,31 @@ const Block: BlockConfig<GoogleCloudConfiguration> = {
     {
       name: "gcp",
       fields: [
+
+        {
+          name: "namespace",
+          title: "Namespace",
+          type: "text",
+          required: true,
+          description: "Kubernetes namespace to create resources into.",
+        },
+
+        {
+          name: "useLocal",
+          title: "Use local kubectl context",
+          type: "boolean",
+          required: true,
+          description: "Selected context is controlled manually by kubectl",
+        },
+
         {
           name: "kubeconfig@private",
           title: "kubeconfig (JSON)",
           type: "comment",
           required: true,
-          description: "Use `kubectl config view --minify --flatten` to generate",
+          description:
+            "Use `kubectl config view --minify --flatten` to generate",
+          visibleIf: "{useLocal} = 'false'",
         },
       ],
     },

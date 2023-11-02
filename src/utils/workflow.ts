@@ -90,13 +90,32 @@ const updateWorkflowFromEdges = (
 };
 
 const filterPrivateData = (
-  data: Partial<NodeDataPayload<unknown>>
+  data: Partial<NodeDataPayload<unknown>>,
+  block: BlockConfig<BlockConfiguration<never>>
 ): NodeDataPayload<unknown> => {
   const filteredData: NodeDataPayloadPrivateStorageNode<typeof data> = [];
   let key: keyof typeof data;
+  // Any keys in the payload marked with @private should be removed, as well
+  // as any fields marked as @private from the field configuration.
   const private_keys = Object.keys(data)
     .filter((key: string) => key.endsWith("@private"))
-    .map((key) => key.substring(0, key.length - 8));
+    .map((key) => key.substring(0, key.length - 8))
+    .concat(
+      block.configuration?.reduce(
+        (p, conf) =>
+          p.concat(
+            conf.fields
+              .filter((field) => (field.name as string).endsWith("@private"))
+              .map((field) =>
+                (field.name as string).substring(
+                  0,
+                  (field.name as string).length - 8
+                )
+              )
+          ),
+        [] as string[]
+      ) || []
+    );
   for (key in data) {
     if (key.endsWith("@private") || private_keys.includes(key)) {
       console.debug(`-- removing private data -- [${key}]`);
@@ -140,7 +159,8 @@ const flowToYaml = (nodes: Node<NodeData>[]): string => {
     if (node.type === "blockNode") {
       const record = {
         ...filterPrivateData(
-          withoutBlockDefaults(node.data.payload, node.data.block)
+          withoutBlockDefaults(node.data.payload, node.data.block),
+          node.data.block
         ),
         pipelayer: { x: node.position.x, y: node.position.y },
       };

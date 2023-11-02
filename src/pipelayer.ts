@@ -10,13 +10,12 @@ import {
   type SurveyJSModelSchemaPage,
   type BlockConfigurationFieldComment,
   type BlockConfigurationFieldMultiple,
-  type SurveyJSModelElementMultipleSchema,
   type BlockConfiguration,
   type NodeData,
   type BlockConfigurationFieldDropdown,
-  type SurveyJSModelElementDropdownSchema,
   type BlockConfigurationFieldSignin,
   type BlockConfigurationFieldBoolean,
+  BlockConfigurationFieldKeyValueList,
 } from "./types";
 
 export const createModelFromBlockConfig = (
@@ -62,6 +61,7 @@ export const createModelFromBlockConfig = (
       validators,
       inputType: field.inputType,
       description: field.description,
+      visibleIf: field.visibleIf,
     };
   };
 
@@ -78,6 +78,7 @@ export const createModelFromBlockConfig = (
       min: field.min,
       max: field.max,
       description: field.description,
+      visibleIf: field.visibleIf,
     };
   };
 
@@ -90,7 +91,31 @@ export const createModelFromBlockConfig = (
     requiredErrorText: "This value is required",
     type: "boolean",
     description: field.description,
+    visibleIf: field.visibleIf,
   });
+
+  const KeyValueListElement = (
+    field: BlockConfigurationField<never, BlockConfigurationFieldKeyValueList>
+  ): SurveyJSModelElementSchema => ({
+    name: String(field.name),
+    title: field.title,
+    isRequired: field.required,
+    requiredErrorText: "This value is required",
+    type: "paneldynamic",
+    description: field.description,
+    visibleIf: field.visibleIf,
+    templateElements: [
+      {
+        type: "multipletext",
+        name: "keyvalue",
+        items: [
+          { name: "key", title: "Key" },
+          { name: "value", title: "Value" },
+        ]
+      }
+    ]
+  });
+
 
   const CommentElement = (
     field: BlockConfigurationField<never, BlockConfigurationFieldComment>
@@ -102,6 +127,7 @@ export const createModelFromBlockConfig = (
       requiredErrorText: "This value is required",
       type: "comment",
       description: field.description,
+      visibleIf: field.visibleIf,
     };
   };
 
@@ -124,7 +150,7 @@ export const createModelFromBlockConfig = (
         )
         .forEach((n) => choices.push(n.data.payload.name));
     }
-    const obj: SurveyJSModelElementMultipleSchema = {
+    return {
       name: String(field.name),
       title: field.title,
       isRequired: field.required,
@@ -132,9 +158,8 @@ export const createModelFromBlockConfig = (
       type: "tagbox",
       description: field.description,
       choices,
+      visibleIf: field.visibleIf,
     };
-
-    return obj;
   };
 
   const DropdownElement = (
@@ -156,7 +181,7 @@ export const createModelFromBlockConfig = (
         )
         .forEach((n) => choices.push(n.data.payload.name));
     }
-    const obj: SurveyJSModelElementDropdownSchema = {
+    return {
       name: String(field.name),
       title: field.title,
       isRequired: field.required,
@@ -164,9 +189,8 @@ export const createModelFromBlockConfig = (
       type: "dropdown",
       choices,
       description: field.description,
+      visibleIf: field.visibleIf,
     };
-
-    return obj;
   };
 
   const SigninElement = (
@@ -179,6 +203,7 @@ export const createModelFromBlockConfig = (
       requiredErrorText: "This value is required",
       type: "signin-google",
       description: field.description,
+      visibleIf: field.visibleIf,
     };
   };
 
@@ -212,6 +237,8 @@ export const createModelFromBlockConfig = (
           p.elements.push(MultipleElement(field));
         } else if (field.type === "dropdown") {
           p.elements.push(DropdownElement(field));
+        } else if (field.type === "keyvalue-list") {
+          p.elements.push(KeyValueListElement(field));
         } else if (field.type === "signin-google")
           p.elements.push(SigninElement(field));
       });

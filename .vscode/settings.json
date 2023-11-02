@@ -4,6 +4,7 @@
         "kubeconfig",
         "pulumi",
         "reactflow",
+        "TRPC",
         "zustand"
     ]
 }

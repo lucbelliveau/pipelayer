@@ -34,7 +34,6 @@ import ReactFlow, {
   MarkerType,
   type Edge,
   type Connection,
-  ConnectionLineType,
   Handle,
   Position,
   type NodeChange,
@@ -43,11 +42,10 @@ import ReactFlow, {
   applyEdgeChanges,
   type Node,
   type NodeProps,
-  ConnectionLineComponentProps,
+  type ConnectionLineComponentProps,
 } from "reactflow";
 import "reactflow/dist/style.css";
 
-import { Model } from "survey-core";
 import { Survey } from "survey-react-ui";
 import "survey-core/defaultV2.min.css";
 
@@ -55,7 +53,7 @@ import Editor from "@monaco-editor/react";
 
 import { api } from "~/utils/api";
 
-import usePipeLayer, { EdgeHiddenHandles } from "~/store";
+import usePipeLayer, { type EdgeHiddenHandles } from "~/store";
 import {
   createNode,
   edgeColors,
@@ -73,14 +71,13 @@ import {
   type NodeData,
   type NodeDragDropTransferObject,
   type BlockCommonConfiguration,
-  ProvidedResourceType,
+  type ProvidedResourceType,
 } from "~/types";
 
 // TODO - move this to the GCP block
 import { Question, ElementFactory, Serializer } from "survey-core";
 import ErrorModal from "~/components/ErrorModal";
 import { type Workflow } from "@prisma/client";
-import { createModelFromBlockConfig } from "~/pipelayer";
 
 class GCPLoginButtonModel extends Question {
   getType() {
@@ -258,7 +255,7 @@ export default function Home() {
       update(workflow, blocks);
       setPreviewDirty(true);
       setHiddenHandles(
-        JSON.parse(settings.data.hiddenHandles as string) as EdgeHiddenHandles
+        JSON.parse(settings.data.hiddenHandles) as EdgeHiddenHandles
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
